@@ -125,6 +125,8 @@ Fail static. When the IAM service is unreachable, a set fetched less than `MaxSt
 
 Checked. The policy set echoes the principal it belongs to, and a set naming anyone else is refused rather than compiled.
 
+Evictable. `Evict(tenantID, principalID)` drops one cached set so the next request resolves it afresh — for a service that observes its own permission-changing writes (ds-iam), calling it synchronously means zero revocation lag for those writes.
+
 Revocation lag equals `TTL` (default 60s) while IAM is reachable. During an outage it can grow to `MaxStale` for a principal whose set was already cached — the price of staying up.
 
 ## Testing handlers

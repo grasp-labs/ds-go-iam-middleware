@@ -71,3 +71,10 @@ func (c *mapCache) Set(key string, entry []byte) error {
 	c.m[key] = entry
 	return nil
 }
+
+func (c *mapCache) Delete(key string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.m, key)
+	return nil
+}

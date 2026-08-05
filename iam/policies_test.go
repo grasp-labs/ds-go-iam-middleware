@@ -230,6 +230,35 @@ func TestLoadRefusesMismatchedPrincipal(t *testing.T) {
 	}
 }
 
+// Evict drops the entry: the next load fetches even though the TTL had not
+// expired, so a synchronous eviction after a write means zero revocation lag.
+func TestEvict(t *testing.T) {
+	f := &flakyFetcher{raw: fixture(t)}
+	now := time.Now().UTC()
+	m := newStaleTestMiddleware(t, f, &now)
+	ctx := context.Background()
+
+	if _, err := m.load(ctx, tenantID, "user-1", "Bearer t"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.load(ctx, tenantID, "user-1", "Bearer t"); err != nil {
+		t.Fatal(err)
+	}
+	if f.count() != 1 {
+		t.Fatalf("fetches before evict = %d, want 1 (second load is a cache hit)", f.count())
+	}
+
+	if err := m.Evict(tenantID, "user-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.load(ctx, tenantID, "user-1", "Bearer t"); err != nil {
+		t.Fatal(err)
+	}
+	if f.count() != 2 {
+		t.Errorf("fetches after evict = %d, want 2 (entry was dropped)", f.count())
+	}
+}
+
 func TestNewValidatesConfig(t *testing.T) {
 	base := func() Config {
 		return Config{

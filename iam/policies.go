@@ -17,6 +17,10 @@ import (
 const cachePrefix = "iam:pol:v1:"
 const compiledCacheMax = 256
 
+func cacheKey(tenantID, principalID string) string {
+	return cachePrefix + tenantID + ":" + principalID
+}
+
 // revalidateCooldown is how long a stale entry is served without retrying the
 // policy source after a failed revalidation. During an outage, one principal
 // costs one fetch round trip per cooldown instead of one per request.
@@ -45,7 +49,7 @@ type PolicySet struct {
 }
 
 func (m *Middleware) load(ctx context.Context, tenantID, principalID, authorization string) (*engine.Compiled, error) {
-	key := cachePrefix + tenantID + ":" + principalID
+	key := cacheKey(tenantID, principalID)
 	prev, cached := m.read(key)
 	now := m.cfg.Now()
 	if cached && now.Sub(prev.FetchedAt) < m.cfg.TTL {
@@ -81,6 +85,15 @@ func (m *Middleware) load(ctx context.Context, tenantID, principalID, authorizat
 		return m.compile(prev, principalID)
 	}
 	return nil, err
+}
+
+// Evict drops the cached policy set for one principal, so the next request
+// resolves it afresh. ds-iam calls this synchronously on its own writes for
+// zero revocation lag; an event consumer would call the same method. The
+// compiled memo needs no eviction — it is content-addressed, and a changed
+// set simply hashes anew.
+func (m *Middleware) Evict(tenantID, principalID string) error {
+	return m.cfg.Cache.Delete(cacheKey(tenantID, principalID))
 }
 
 func (m *Middleware) fetch(ctx context.Context, key, tenantID, principalID, authorization string, prev cacheEntry) (cacheEntry, error) {

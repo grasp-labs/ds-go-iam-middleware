@@ -164,9 +164,11 @@ draft, with the reasoning on record:
   revocation lag by event latency; this implementation bounds it by a
   deliberately short TTL (60s) instead — simpler, no consumer to operate, and
   the lag is already tighter than the draft's 5m TTL backstop. The seam for
-  events is an eviction API on the middleware plus `Delete` on the cache; it
-  can be added without changing any call site, and ds-iam's synchronous
-  self-eviction would use the same API.
+  events exists: `Evict(tenant, principal)` drops one cached set, which is
+  what ds-iam calls synchronously on its own writes (zero revocation lag for
+  the writes it observes) and what a future consumer would call per `member`
+  event. Tenant-wide eviction for `group`/`policy` events is the one piece
+  that remains future work.
 - **No shadow mode.** Rollout risk is managed by environment: each service is
   deployed against dev before prod, so enforcement is exercised end to end
   before it guards production traffic. Denials are logged at `Info` with
