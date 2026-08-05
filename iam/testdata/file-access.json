@@ -1,0 +1,58 @@
+{
+  "principal_id": "user-1",
+  "policies": [
+    {
+      "id": "9a1d4e7c-3b52-4f18-9c60-8e2a7d5b4f01",
+      "version": "1.0.0",
+      "statements": [
+        {
+          "sid": "read-active-files",
+          "effect": "allow",
+          "actions": [
+            "file:getFile",
+            "file:listFiles",
+            "file:getFileContent",
+            "file:search"
+          ],
+          "resources": [
+            "crn:11111111-1111-4111-8111-111111111111:*:file::file:**"
+          ],
+          "conditions": {
+            "StringEquals": {
+              "status": "active"
+            }
+          }
+        },
+        {
+          "sid": "write-projectx-unless-restricted",
+          "effect": "allow",
+          "actions": [
+            "file:createFile",
+            "file:updateFile",
+            "file:updateFileContent",
+            "file:patchFile",
+            "file:deleteFile"
+          ],
+          "resources": [
+            "crn:11111111-1111-4111-8111-111111111111:*:file::file:projectx/**"
+          ],
+          "conditions": {
+            "StringNotEquals": {
+              "tag.classification": "restricted"
+            }
+          }
+        },
+        {
+          "sid": "protect-projectx-secrets",
+          "effect": "deny",
+          "actions": [
+            "*"
+          ],
+          "resources": [
+            "crn:11111111-1111-4111-8111-111111111111:*:file::file:projectx/secrets/**"
+          ]
+        }
+      ]
+    }
+  ]
+}
