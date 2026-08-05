@@ -38,10 +38,10 @@ func NewTestContext(ctx context.Context, p Principal, policySetJSON []byte) (con
 }
 
 // StaticFetcher answers every fetch with the same response body, ignoring the
-// principal, the authorization, and any ETag offered.
+// tenant, the principal, the authorization, and any ETag offered.
 type StaticFetcher []byte
 
-func (f StaticFetcher) FetchPolicies(context.Context, string, string, string) (FetchResult, error) {
+func (f StaticFetcher) FetchPolicies(context.Context, string, string, string, string) (FetchResult, error) {
 	return FetchResult{Raw: f}, nil
 }
 

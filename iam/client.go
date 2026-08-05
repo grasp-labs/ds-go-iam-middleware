@@ -9,12 +9,19 @@ import (
 	"strings"
 )
 
+// PolicyFetcher is the data-plane seam: everything above it — cache, ages,
+// compile, Decide, Constrain — is fetcher-agnostic. HTTPFetcher is the default
+// for every service; ds-iam, which owns the tables, adapts its own resolution
+// service instead of calling itself over HTTP.
 type PolicyFetcher interface {
-	// FetchPolicies retrieves the policy set for principalID. authorization is
-	// the caller's Authorization header value, forwarded so the policy source
-	// applies its own access control; etag, when non-empty, asks the source to
-	// answer NotModified if the set is unchanged.
-	FetchPolicies(ctx context.Context, principalID, authorization, etag string) (FetchResult, error)
+	// FetchPolicies retrieves the policy set in force for (tenantID,
+	// principalID). authorization is the caller's Authorization header value,
+	// forwarded so the policy source applies its own access control — an
+	// in-process source that resolves from tenantID directly may ignore it, as
+	// the HTTP source ignores tenantID (the bearer scopes the tenant). etag,
+	// when non-empty, asks the source to answer NotModified if the set is
+	// unchanged.
+	FetchPolicies(ctx context.Context, tenantID, principalID, authorization, etag string) (FetchResult, error)
 }
 
 type FetchResult struct {
@@ -32,7 +39,7 @@ type HTTPFetcher struct {
 	Client  *http.Client
 }
 
-func (f *HTTPFetcher) FetchPolicies(ctx context.Context, principalID, authorization, etag string) (FetchResult, error) {
+func (f *HTTPFetcher) FetchPolicies(ctx context.Context, _, principalID, authorization, etag string) (FetchResult, error) {
 	endpoint := strings.TrimRight(f.BaseURL, "/") + "/principal/" + url.PathEscape(principalID) + "/policies/"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)

@@ -8,8 +8,9 @@ owns the records ([`contract.md`](contract.md)), `ds-go-policy` owns matching
 and effect resolution ([`policy/iam-policy-contract.md`](policy/iam-policy-contract.md)),
 and the middleware owns **resolving the caller's policy set, keeping it fresh,
 and turning a decision into an HTTP verdict**. There is no standalone PDP
-service: the policy set is fetched from the IAM API, compiled once, cached in
-process, and evaluated locally. The engine is a pure function of
+service: the policy set is fetched from the IAM API (or resolved in-process,
+inside ds-iam itself — see [Data plane](#data-plane)), compiled once, cached
+in process, and evaluated locally. The engine is a pure function of
 `(policies, request)`, so a remote PDP could replace local evaluation later
 without touching a single service call site.
 
@@ -25,8 +26,8 @@ The library exposes three things, split so the fetch/cache concern and the
 decision concern sit where each belongs.
 
 **The resolver middleware** runs on every protected route. It resolves the
-compiled policy set for `(tenant, sub)` — from cache or from the IAM API — and
-stores it in the request context. It makes no decision by itself; a principal
+compiled policy set for `(tenant, sub)` — from cache or from the policy
+source — and stores it in the request context. It makes no decision by itself; a principal
 with an empty set passes through and every later check denies.
 
 **`Decide`** is the point check, called in the handler at the moment the
@@ -54,7 +55,24 @@ request path.
 
 ## Data plane
 
-The middleware reads exactly one IAM endpoint:
+The middleware never talks to storage directly; it resolves policy sets
+through one small seam:
+
+```go
+// PolicyFetcher returns the engine documents in force for (tenant, principal),
+// plus a strong tag over the set. When the offered etag still matches, the
+// source answers NotModified: no documents, no recompile.
+type PolicyFetcher interface {
+    FetchPolicies(ctx context.Context, tenantID, principalID, authorization, etag string) (FetchResult, error)
+}
+```
+
+Everything above the seam — cache, ages, compile, `Decide`, `Constrain` — is
+fetcher-agnostic. Two implementations exist, and choosing one is the only
+per-service wiring difference.
+
+**The HTTP fetcher** is the default, used by every service except ds-iam. It
+reads exactly one IAM endpoint:
 
 ```text
 GET {iam}/principal/{principal_id}/policies/
@@ -68,14 +86,25 @@ placeholder handling: the reserved `aic` tenant token is matched natively by
 the engine at evaluation time.
 
 The response carries a strong `ETag` over the set's policy ids and
-modification times. The middleware stores it alongside the compiled set and
-revalidates with `If-None-Match`; a `304` costs no body and no recompile. An
-empty set is a valid answer (`200`, `policies: []`) and is cached like any
-other — absence of grants is default-deny, not an error.
+modification times; revalidation is `If-None-Match`, and a `304` costs no body
+and no recompile. An empty set is a valid answer (`200`, `policies: []`) and
+is cached like any other — absence of grants is default-deny, not an error.
+The call forwards `authorization` — the caller's own bearer, captured verbatim
+from the request — so the IAM API's tenant scoping applies unchanged and the
+middleware needs no credentials of its own; the `tenantID` argument is unused,
+because the bearer already scopes the tenant.
 
-The call is made with the caller's own bearer token forwarded, so the IAM
-API's tenant scoping applies unchanged and the middleware needs no credentials
-of its own.
+**The in-process fetcher** exists because ds-iam enforces access with the same
+middleware, and the service calling itself over HTTPS would be a needless hop
+and a circular dependency — an overload would degrade resolution, which would
+add load. ds-iam owns the tables and already owns the resolution logic, so its
+fetcher is a thin adapter over `PrincipalService.EffectivePolicies` — the same
+code path the HTTP endpoint serves, so the two fetchers cannot disagree on
+what a principal's set is. It resolves from `tenantID` directly and ignores
+`authorization`; the tag is computed with the same id + modified-time hash the
+endpoint uses for its `ETag`. Nothing else changes: the compiled set is still
+cached with the same ages, because the cost being amortized is
+`engine.Compile`, not the fetch.
 
 ## Cache
 
@@ -89,10 +118,10 @@ two service replicas simply cache independently.
 Each entry has two ages:
 
 - **TTL** (order of minutes): past it, the entry must be revalidated against
-  the IAM API before use. An unchanged set (`304`) resets the clock without a
-  recompile.
+  the policy source before use. An unchanged set (`304`, or a matching tag)
+  resets the clock without a recompile.
 - **Max-stale** (order of tens of minutes): the hard bound. Past it, the entry
-  is unusable even if the IAM API is down.
+  is unusable even if the policy source is down.
 
 Within the TTL every request is a pure cache hit, so the correctness property
 — **revocation lag** — is bounded by the TTL. A grant that appears late is
@@ -105,8 +134,8 @@ Decisions fail closed; availability degrades before correctness does.
 | Situation | Behavior |
 |---|---|
 | Set resolved, statement denies or nothing matches | `403`, reason logged (`sid` or implicit deny) |
-| IAM API unreachable, cached entry within max-stale | Serve from stale cache; revalidation retries on a short cooldown |
-| IAM API unreachable, no entry or past max-stale | `503` — an outage, not a denial, and callers must be able to tell them apart |
+| Policy source unreachable, cached entry within max-stale | Serve from stale cache; revalidation retries on a short cooldown |
+| Policy source unreachable, no entry or past max-stale | `503` — an outage, not a denial, and callers must be able to tell them apart |
 | Policy set fails to compile | The whole set is refused (`503`) and logged loudly — excluding only the bad document could drop a `deny` and silently widen access. The IAM API's 422 validation makes this a should-never invariant, not a live path |
 
 The middleware never fails open: there is no configuration that turns an
@@ -120,10 +149,33 @@ before it guards production traffic.
 
 | Key | Meaning | Default |
 |---|---|---|
-| `iam_base_url` | IAM API prefix, e.g. `https://…/api/iam/v1` | — (required) |
+| `iam_base_url` | IAM API prefix, e.g. `https://…/api/iam/v1` (HTTP fetcher only) | — (required) |
+| `cache_life_window` | How long the service-owned cache retains entries (for bigcache, its `LifeWindow`); must be at least `cache_max_stale`, refused at startup otherwise | — (required) |
 | `cache_ttl` | Revalidation age of a cached set | `60s` |
-| `cache_max_stale` | Hard bound for serving when the IAM API is unreachable | `30m` |
+| `cache_max_stale` | Hard bound for serving when the policy source is unreachable | `30m` |
 | `fetch_timeout` | Budget for one data-plane call | `3s` |
+
+## Deviations from the governance draft
+
+Three places where this contract deliberately departs from the governance
+draft, with the reasoning on record:
+
+- **No event-driven invalidation (yet).** The draft's Kafka eviction bounds
+  revocation lag by event latency; this implementation bounds it by a
+  deliberately short TTL (60s) instead — simpler, no consumer to operate, and
+  the lag is already tighter than the draft's 5m TTL backstop. The seam for
+  events is an eviction API on the middleware plus `Delete` on the cache; it
+  can be added without changing any call site, and ds-iam's synchronous
+  self-eviction would use the same API.
+- **No shadow mode.** Rollout risk is managed by environment: each service is
+  deployed against dev before prod, so enforcement is exercised end to end
+  before it guards production traffic. Denials are logged at `Info` with
+  action and reason, which provides the observability shadow mode existed for.
+- **Compile failure refuses the whole set.** The draft excludes the failing
+  document; excluding a `deny` document would silently widen access — the one
+  direction an authorization system must never fail. The IAM API's 422
+  validation makes the case should-never either way, so the stricter behavior
+  costs nothing.
 
 ## Ownership
 

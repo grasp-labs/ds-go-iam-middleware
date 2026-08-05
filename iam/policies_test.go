@@ -18,7 +18,7 @@ type flakyFetcher struct {
 	calls int
 }
 
-func (f *flakyFetcher) FetchPolicies(context.Context, string, string, string) (FetchResult, error) {
+func (f *flakyFetcher) FetchPolicies(context.Context, string, string, string, string) (FetchResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
@@ -162,7 +162,7 @@ type etagFetcher struct {
 	calls int
 }
 
-func (f *etagFetcher) FetchPolicies(_ context.Context, _, _, etag string) (FetchResult, error) {
+func (f *etagFetcher) FetchPolicies(_ context.Context, _, _, _, etag string) (FetchResult, error) {
 	f.calls++
 	if etag == `"v1"` {
 		return FetchResult{NotModified: true, ETag: etag}, nil

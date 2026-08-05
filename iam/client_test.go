@@ -21,7 +21,7 @@ func TestHTTPFetcherRequestShape(t *testing.T) {
 	defer srv.Close()
 
 	f := &HTTPFetcher{BaseURL: srv.URL + "/"} // trailing slash must not double up
-	res, err := f.FetchPolicies(context.Background(), "user@example.com", "Bearer tok", `"v6"`)
+	res, err := f.FetchPolicies(context.Background(), tenantID, "user@example.com", "Bearer tok", `"v6"`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestHTTPFetcherStatusMapping(t *testing.T) {
 			defer srv.Close()
 
 			f := &HTTPFetcher{BaseURL: srv.URL}
-			res, err := f.FetchPolicies(context.Background(), "user-1", "Bearer tok", `"v1"`)
+			res, err := f.FetchPolicies(context.Background(), tenantID, "user-1", "Bearer tok", `"v1"`)
 			if tc.want == nil {
 				if err != nil {
 					t.Fatal(err)
@@ -85,7 +85,7 @@ func TestHTTPFetcherTransportError(t *testing.T) {
 	srv.Close() // nothing listens anymore
 
 	f := &HTTPFetcher{BaseURL: srv.URL}
-	if _, err := f.FetchPolicies(context.Background(), "user-1", "", ""); !errors.Is(err, ErrPolicySourceUnavailable) {
+	if _, err := f.FetchPolicies(context.Background(), tenantID, "user-1", "", ""); !errors.Is(err, ErrPolicySourceUnavailable) {
 		t.Fatalf("err = %v, want ErrPolicySourceUnavailable", err)
 	}
 }
@@ -98,7 +98,7 @@ func TestHTTPFetcherResponseTooLarge(t *testing.T) {
 	defer srv.Close()
 
 	f := &HTTPFetcher{BaseURL: srv.URL}
-	if _, err := f.FetchPolicies(context.Background(), "user-1", "", ""); !errors.Is(err, ErrPolicySourceUnavailable) {
+	if _, err := f.FetchPolicies(context.Background(), tenantID, "user-1", "", ""); !errors.Is(err, ErrPolicySourceUnavailable) {
 		t.Fatalf("err = %v, want ErrPolicySourceUnavailable", err)
 	}
 }

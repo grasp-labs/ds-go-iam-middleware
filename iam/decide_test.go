@@ -160,7 +160,7 @@ type countingFetcher struct {
 	calls int
 }
 
-func (f *countingFetcher) FetchPolicies(context.Context, string, string, string) (FetchResult, error) {
+func (f *countingFetcher) FetchPolicies(context.Context, string, string, string, string) (FetchResult, error) {
 	f.calls++
 	return FetchResult{Raw: f.raw, ETag: `"v1"`}, nil
 }

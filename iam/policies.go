@@ -62,7 +62,7 @@ func (m *Middleware) load(ctx context.Context, tenantID, principalID, authorizat
 	// first caller's credential. Same principal, same scope, so any of the
 	// waiting requests' tokens would have produced the same set.
 	entry, err, _ := m.group.Do(key, func() (any, error) {
-		return m.fetch(ctx, key, principalID, authorization, prev)
+		return m.fetch(ctx, key, tenantID, principalID, authorization, prev)
 	})
 	if err == nil {
 		return m.compile(entry.(cacheEntry), principalID)
@@ -83,13 +83,13 @@ func (m *Middleware) load(ctx context.Context, tenantID, principalID, authorizat
 	return nil, err
 }
 
-func (m *Middleware) fetch(ctx context.Context, key, principalID, authorization string, prev cacheEntry) (cacheEntry, error) {
+func (m *Middleware) fetch(ctx context.Context, key, tenantID, principalID, authorization string, prev cacheEntry) (cacheEntry, error) {
 	// Detached from the request: other requests may be waiting on this fetch,
 	// so one client disconnecting must not cancel it.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.cfg.Timeout)
 	defer cancel() //nolint:errcheck
 
-	res, err := m.cfg.Fetcher.FetchPolicies(ctx, principalID, authorization, prev.ETag)
+	res, err := m.cfg.Fetcher.FetchPolicies(ctx, tenantID, principalID, authorization, prev.ETag)
 	if err != nil {
 		return cacheEntry{}, fmt.Errorf("iam: fetching policies for %s: %w", principalID, err)
 	}
