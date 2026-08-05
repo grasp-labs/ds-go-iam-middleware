@@ -3,6 +3,7 @@
   "policies": [
     {
       "id": "9a1d4e7c-3b52-4f18-9c60-8e2a7d5b4f01",
+      "name": "file-access",
       "version": "1.0.0",
       "statements": [
         {
