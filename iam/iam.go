@@ -56,6 +56,15 @@ type Config struct {
 	// Principal reads the principal from the request context. Required.
 	Principal func(context.Context) (Principal, error)
 
+	// ServiceID, when set, narrows the set to what this service can act on
+	// before it is compiled: a statement keeps only its actions scoped to this
+	// service ("file:getFile", "file:*") or unscoped ("*"), and statements —
+	// then policies — left empty are dropped. A service only decides its own
+	// actions, so this trims the compiled set without changing a verdict. It
+	// applies whatever the fetcher, since it is the consumer, not the source,
+	// that is scoped. Empty (the default) compiles the whole set.
+	ServiceID string
+
 	// TTL is how long policies are served from Cache before revalidation, and
 	// therefore the revocation lag. Default 60s.
 	TTL time.Duration

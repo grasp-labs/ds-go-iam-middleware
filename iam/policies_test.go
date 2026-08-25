@@ -5,9 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/grasp-labs/ds-go-policy/engine"
+	"github.com/grasp-labs/ds-go-policy/policy"
 )
 
 // flakyFetcher succeeds until fail is set, then returns it.
@@ -256,6 +260,84 @@ func TestEvict(t *testing.T) {
 	}
 	if f.count() != 2 {
 		t.Errorf("fetches after evict = %d, want 2 (entry was dropped)", f.count())
+	}
+}
+
+// filterByService keeps a statement's actions scoped to the service
+// ("file:getFile", "file:*") or unscoped ("*"), strips other services' actions,
+// and drops statements — then policies — left empty.
+func TestFilterByService(t *testing.T) {
+	in := []policy.Policy{
+		{
+			ID: "p1",
+			Statements: []policy.Statement{
+				{Sid: "mixed", Effect: policy.Allow, Actions: []string{"file:getFile", "file:*", "state:getJobs"}, Resources: []string{"r"}},
+				{Sid: "other-only", Effect: policy.Allow, Actions: []string{"state:getJobs", "state:listJobs"}, Resources: []string{"r"}},
+				{Sid: "wildcard-deny", Effect: policy.Deny, Actions: []string{"*"}, Resources: []string{"r"}},
+			},
+		},
+		{
+			ID:         "p2", // state-only: drops entirely
+			Statements: []policy.Statement{{Sid: "state", Effect: policy.Allow, Actions: []string{"state:*"}, Resources: []string{"r"}}},
+		},
+	}
+
+	out := filterByService(in, "file")
+
+	if len(out) != 1 || out[0].ID != "p1" {
+		t.Fatalf("policies = %+v, want only p1", out)
+	}
+	stmts := out[0].Statements
+	if len(stmts) != 2 {
+		t.Fatalf("statements = %d, want 2 (mixed, wildcard-deny): %+v", len(stmts), stmts)
+	}
+	if got, want := stmts[0].Actions, []string{"file:getFile", "file:*"}; !slices.Equal(got, want) {
+		t.Errorf("mixed actions = %v, want %v (scoped literal + wildcard kept, other stripped)", got, want)
+	}
+	if got, want := stmts[1].Actions, []string{"*"}; !slices.Equal(got, want) {
+		t.Errorf("wildcard deny actions = %v, want the unscoped * kept", got)
+	}
+}
+
+// With Config.ServiceID set, the compiled set carries only this service's
+// statements: a same-service allow decides, a surviving unscoped "*" deny still
+// applies, and another service's policy is gone without disturbing either.
+func TestLoadFiltersByService(t *testing.T) {
+	body := []byte(fmt.Sprintf(`{
+		"principal_id": "user-1",
+		"policies": [
+			{"id":"p1","version":"1.0.0","statements":[
+				{"sid":"allow-file","effect":"allow","actions":["file:getFile","state:getJobs"],"resources":["crn:%[1]s:*:file::file:**"]},
+				{"sid":"deny-secrets","effect":"deny","actions":["*"],"resources":["crn:%[1]s:*:file::file:projectx/secrets/**"]}
+			]},
+			{"id":"p2","version":"1.0.0","statements":[
+				{"sid":"state-only","effect":"allow","actions":["state:listJobs"],"resources":["crn:%[1]s:*:state::state:**"]}
+			]}
+		]
+	}`, tenantID))
+
+	m, err := New(Config{
+		Fetcher:         StaticFetcher(body),
+		Cache:           NewMapCache(),
+		CacheLifeWindow: DefaultCacheMaxStale,
+		Principal:       func(context.Context) (Principal, error) { return Principal{ID: "user-1", TenantID: tenantID}, nil },
+		ServiceID:       "file",
+		Logger:          slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	set, err := m.load(context.Background(), tenantID, "user-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if d := set.Decide(engine.Request{Action: "file:getFile", Resource: resource(t, "projectx/app.json")}); !d.Allowed {
+		t.Errorf("file:getFile = denied (%s), want allowed: the scoped action survived filtering", d.Reason)
+	}
+	if d := set.Decide(engine.Request{Action: "file:getFile", Resource: resource(t, "projectx/secrets/db.json")}); d.Allowed {
+		t.Error("file:getFile on secrets = allowed, want denied: the unscoped * deny must survive filtering")
 	}
 }
 

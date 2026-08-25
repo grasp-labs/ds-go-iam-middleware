@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -144,12 +145,51 @@ func (m *Middleware) compile(e cacheEntry, principalID string) (*engine.Compiled
 		return nil, ErrPolicySetMismatch
 	}
 
-	set, err := engine.Compile(policySet.Policies)
+	policies := policySet.Policies
+	if m.cfg.ServiceID != "" {
+		policies = filterByService(policies, m.cfg.ServiceID)
+	}
+	set, err := engine.Compile(policies)
 	if err != nil {
 		return nil, fmt.Errorf("iam: compiling policies: %w", err)
 	}
 	m.compiled.put(e.Hash, &set)
 	return &set, nil
+}
+
+// filterByService drops everything the named service cannot act on: each
+// statement keeps only its actions scoped to serviceID ("file:getFile",
+// "file:*") or unscoped ("*"), statements left with no action are removed, and
+// policies left with no statement follow. A service only decides its own
+// actions, so a dropped one could never have matched — this trims the compiled
+// set, it does not change a verdict. The compiled cache is per-Middleware and
+// ServiceID is fixed for its lifetime, so the content hash still keys it
+// unambiguously.
+func filterByService(in []policy.Policy, serviceID string) []policy.Policy {
+	prefix := serviceID + ":"
+	out := make([]policy.Policy, 0, len(in))
+	for _, p := range in {
+		statements := make([]policy.Statement, 0, len(p.Statements))
+		for _, s := range p.Statements {
+			actions := make([]string, 0, len(s.Actions))
+			for _, a := range s.Actions {
+				if a == "*" || strings.HasPrefix(a, prefix) {
+					actions = append(actions, a)
+				}
+			}
+			if len(actions) == 0 {
+				continue
+			}
+			s.Actions = actions
+			statements = append(statements, s)
+		}
+		if len(statements) == 0 {
+			continue
+		}
+		p.Statements = statements
+		out = append(out, p)
+	}
+	return out
 }
 
 func (m *Middleware) read(key string) (cacheEntry, bool) {
