@@ -27,6 +27,8 @@ e.Use(authz.Handler())
 
 `Principal` is `func(context.Context) (iam.Principal, error)` — read the ID and tenant from whatever your auth middleware already put in the context. This package never validates credentials.
 
+`HTTPFetcher.ServiceID` is an optional opt-in: set it to your service (e.g. `ServiceID: "file"`) and each fetched set is narrowed to the statements that name this service or are unscoped (`*`) before it is cached and compiled. The file service compiles `file:getFile` but drops `state:getJobs`. It only ever decides its own actions, so the dropped ones could never have matched — this trims the compiled set without changing a verdict. Left unset, the whole set is compiled.
+
 `CacheLifeWindow` is required and must be at least `MaxStale` (default 30m). Serving through an IAM outage reads cache entries up to `MaxStale` old, and a cache that evicts sooner would silently shorten that tolerance to its own window — so `New` refuses the mismatch at startup instead. Pass the same constant your cache was built from; if your API's cache keeps the common 10-minute window, either raise it to 30m or set `MaxStale` to 10m deliberately.
 
 `Handler` captures the request's `Authorization` header and forwards it verbatim when the principal's policies are fetched, so the IAM API's own tenant scoping applies and the service configures no credentials for this middleware.

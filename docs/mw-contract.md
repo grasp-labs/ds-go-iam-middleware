@@ -94,6 +94,17 @@ from the request — so the IAM API's tenant scoping applies unchanged and the
 middleware needs no credentials of its own; the `tenantID` argument is unused,
 because the bearer already scopes the tenant.
 
+The fetcher takes an optional `ServiceID`. When set, it narrows the fetched set
+before it is cached and compiled to the statements the service can act on: each
+statement keeps only the actions scoped to that service (`file` keeps
+`file:getFile` and `file:*`) or unscoped (`*`), and statements — then policies —
+left with no action are dropped. The file service compiles `file:getFile` but
+never `state:getJobs`. A service only ever decides its own actions, so a dropped
+one could never have matched a request; this trims the compiled set without
+changing a verdict. The `ETag` still tags the full upstream set, so revalidation
+is unchanged — an unchanged set is an unchanged subset. Left unset, the whole
+set is compiled.
+
 **The in-process fetcher** exists because ds-iam enforces access with the same
 middleware, and the service calling itself over HTTPS would be a needless hop
 and a circular dependency — an overload would degrade resolution, which would
