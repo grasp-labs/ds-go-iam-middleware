@@ -136,8 +136,9 @@ dropped. The file service compiles `file:getFile` but never `state:getJobs`. A
 service only ever decides its own actions, so a dropped one could never have
 matched a request; this trims the compiled set without changing a verdict. It is
 a consumer concern, not a source one, so it lives with `Compile` and the raw
-cache still holds the source's exact bytes and `ETag`. Left unset, the whole set
-is compiled.
+cache still holds the source's exact bytes and `ETag`. `Constrain` applies the
+same boundary to allow and deny resource patterns, retaining the configured
+service and `*`. Left unset, the whole set is unchanged.
 
 ## Failure policy
 

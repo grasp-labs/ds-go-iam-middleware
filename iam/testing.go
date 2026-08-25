@@ -23,12 +23,24 @@ import (
 // middleware refuses a set belonging to someone else, and this helper does not
 // paper over that.
 func NewTestContext(ctx context.Context, p Principal, policySetJSON []byte) (context.Context, error) {
+	return newTestContext(ctx, p, policySetJSON, "")
+}
+
+// NewTestContextWithServiceID is NewTestContext with Config.ServiceID set.
+// Use it when a handler test needs the same action and resource constraint
+// scoping as a service's production middleware configuration.
+func NewTestContextWithServiceID(ctx context.Context, p Principal, policySetJSON []byte, serviceID string) (context.Context, error) {
+	return newTestContext(ctx, p, policySetJSON, serviceID)
+}
+
+func newTestContext(ctx context.Context, p Principal, policySetJSON []byte, serviceID string) (context.Context, error) {
 	m, err := New(Config{
 		Fetcher: StaticFetcher(policySetJSON),
 		Cache:   NewMapCache(),
 		// The map cache never evicts, so any value at least MaxStale is true.
 		CacheLifeWindow: DefaultCacheMaxStale,
 		Principal:       func(context.Context) (Principal, error) { return p, nil },
+		ServiceID:       serviceID,
 		Logger:          slog.New(slog.DiscardHandler),
 	})
 	if err != nil {

@@ -27,7 +27,7 @@ e.Use(authz.Handler())
 
 `Principal` is `func(context.Context) (iam.Principal, error)` — read the ID and tenant from whatever your auth middleware already put in the context. This package never validates credentials.
 
-`ServiceID` is an optional opt-in: set it in `Config` (e.g. `ServiceID: "file"`) and the set is narrowed at compile to the statements that name this service or are unscoped (`*`). The file service compiles `file:getFile` but drops `state:getJobs`. It only ever decides its own actions, so the dropped ones could never have matched — this trims the compiled set without changing a verdict. It sits above the fetcher seam, so it works for either policy source; left unset, the whole set is compiled.
+`ServiceID` is an optional opt-in: set it in `Config` (e.g. `ServiceID: "file"`) and compilation keeps actions for this service or `*`, while `Constrain` keeps allow and deny resource patterns for this service or `*`. The file service compiles `file:getFile` but drops `state:getJobs`. It sits above the fetcher seam, so it works for either policy source; left unset, the whole set is unchanged.
 
 `CacheLifeWindow` is required and must be at least `MaxStale` (default 30m). Serving through an IAM outage reads cache entries up to `MaxStale` old, and a cache that evicts sooner would silently shorten that tolerance to its own window — so `New` refuses the mismatch at startup instead. Pass the same constant your cache was built from; if your API's cache keeps the common 10-minute window, either raise it to 30m or set `MaxStale` to 10m deliberately.
 

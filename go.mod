@@ -3,7 +3,7 @@ module github.com/grasp-labs/ds-go-iam-middleware
 go 1.26.2
 
 require (
-	github.com/grasp-labs/ds-go-policy v1.1.1
+	github.com/grasp-labs/ds-go-policy v1.3.0
 	github.com/labstack/echo/v4 v4.15.4
 	golang.org/x/sync v0.22.0
 )
