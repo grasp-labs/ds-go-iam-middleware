@@ -341,6 +341,32 @@ func TestLoadFiltersByService(t *testing.T) {
 	}
 }
 
+// A principal holding only other-service grants filters to nothing. That must
+// compile as a clean default-deny set, not fail — it is a legitimate answer,
+// not an outage.
+func TestLoadFiltersToEmptySet(t *testing.T) {
+	body := []byte(fmt.Sprintf(`{"principal_id":"user-1","policies":[{"id":"p1","version":"1.0.0","statements":[{"sid":"state","effect":"allow","actions":["state:getJobs"],"resources":["crn:%s:*:state::state:**"]}]}]}`, tenantID))
+	m, err := New(Config{
+		Fetcher:         StaticFetcher(body),
+		Cache:           NewMapCache(),
+		CacheLifeWindow: DefaultCacheMaxStale,
+		Principal:       func(context.Context) (Principal, error) { return Principal{ID: "user-1", TenantID: tenantID}, nil },
+		ServiceID:       "file",
+		Logger:          slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	set, err := m.load(context.Background(), tenantID, "user-1", "")
+	if err != nil {
+		t.Fatalf("empty filtered set must compile, got error: %v", err)
+	}
+	if d := set.Decide(engine.Request{Action: "file:getFile", Resource: resource(t, "projectx/app.json")}); d.Allowed {
+		t.Error("empty set allowed a request, want default deny")
+	}
+}
+
 func TestNewValidatesConfig(t *testing.T) {
 	base := func() Config {
 		return Config{
