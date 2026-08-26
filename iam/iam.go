@@ -56,13 +56,15 @@ type Config struct {
 	// Principal reads the principal from the request context. Required.
 	Principal func(context.Context) (Principal, error)
 
-	// ServiceID, when set, narrows the set to what this service can act on
-	// before it is compiled: a statement keeps only its actions scoped to this
-	// service ("file:getFile", "file:*") or unscoped ("*"), and statements —
-	// then policies — left empty are dropped. A service only decides its own
-	// actions, so this trims the compiled set without changing a verdict. It
-	// applies whatever the fetcher, since it is the consumer, not the source,
-	// that is scoped. Empty (the default) compiles the whole set.
+	// ServiceID, when set, limits policies to the service using this middleware.
+	// Before compilation, each statement keeps only actions for this service
+	// ("file:getFile", "file:*") or the wildcard action ("*"). Statements and
+	// policies with no remaining actions are dropped.
+	//
+	// Constrain applies the same boundary to resources. It keeps allow and deny
+	// patterns for this service or the wildcard service and removes patterns for
+	// other services before they reach a query adapter. Empty (the default)
+	// leaves the policy set unchanged.
 	ServiceID string
 
 	// TTL is how long policies are served from Cache before revalidation, and

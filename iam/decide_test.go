@@ -3,12 +3,15 @@ package iam
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/grasp-labs/ds-go-policy/crn"
+	"github.com/grasp-labs/ds-go-policy/engine"
 )
 
 // Must match the tenant in testdata/file-access.json.
@@ -105,6 +108,90 @@ func TestConstrain(t *testing.T) {
 	}
 	if len(cons.Allow) != 0 {
 		t.Errorf("ungranted action Allow = %d matches, want 0", len(cons.Allow))
+	}
+}
+
+func constraintServices(matches []engine.ResourceMatch) []string {
+	services := make([]string, 0, len(matches))
+	for _, match := range matches {
+		services = append(services, match.Pattern.Service())
+	}
+	return services
+}
+
+func TestConstrainFiltersResourcesByService(t *testing.T) {
+	policyJSON := fmt.Appendf(nil, `{
+		"principal_id": "user-1",
+		"policies": [{
+			"id": "service-resources",
+			"version": "1.0.0",
+			"statements": [
+				{
+					"sid": "allow-services",
+					"effect": "allow",
+					"actions": ["*"],
+					"resources": [
+						"crn:%[1]s:*:file::file:**",
+						"crn:%[1]s:*:*::file:**",
+						"crn:%[1]s:*:state::file:**"
+					]
+				},
+				{
+					"sid": "deny-services",
+					"effect": "deny",
+					"actions": ["*"],
+					"resources": [
+						"crn:%[1]s:*:file::file:private/**",
+						"crn:%[1]s:*:*::file:shared/**",
+						"crn:%[1]s:*:state::file:archived/**"
+					]
+				}
+			]
+		}]
+	}`, tenantID)
+
+	tests := []struct {
+		name      string
+		serviceID string
+		wantAllow []string
+		wantDeny  []string
+	}{
+		{
+			name:      "configured",
+			serviceID: "file",
+			wantAllow: []string{"file", crn.Wildcard},
+			wantDeny:  []string{"file", crn.Wildcard},
+		},
+		{
+			name:      "disabled",
+			wantAllow: []string{"file", crn.Wildcard, "state"},
+			wantDeny:  []string{"file", crn.Wildcard, "state"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, err := NewTestContextWithServiceID(
+				context.Background(),
+				Principal{ID: "user-1", TenantID: tenantID},
+				policyJSON,
+				test.serviceID,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			constraints, err := Constrain(ctx, "file:listFiles", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := constraintServices(constraints.Allow); !slices.Equal(got, test.wantAllow) {
+				t.Errorf("allow services = %v, want %v", got, test.wantAllow)
+			}
+			if got := constraintServices(constraints.Deny); !slices.Equal(got, test.wantDeny) {
+				t.Errorf("deny services = %v, want %v", got, test.wantDeny)
+			}
+		})
 	}
 }
 
