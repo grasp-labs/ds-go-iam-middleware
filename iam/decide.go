@@ -166,13 +166,20 @@ func Constrain(ctx context.Context, action string, attrs map[string]string) (eng
 	// The principal's tenant resolves any platform ("aic") patterns, so the
 	// adapter only ever sees concrete tenants.
 	constraints := set.Constrain(action, h.principal.TenantID, attrs)
-	if serviceID := h.mw.cfg.ServiceID; serviceID != "" {
-		constraints = constraints.Filter(func(match engine.ResourceMatch) bool {
-			service := match.Pattern.Service()
-			return service == serviceID || service == crn.Wildcard
-		})
+	if h.mw.cfg.ServiceID != "" {
+		constraints = scopeToService(constraints, h.mw.cfg.ServiceID)
 	}
 	return constraints, nil
+}
+
+// scopeToService drops resource patterns another service owns, keeping only
+// those for serviceID or the wildcard service. It mirrors filterByService on
+// the resource side: a trim for the query adapter, not a change to any verdict.
+func scopeToService(constraints engine.Constraints, serviceID string) engine.Constraints {
+	return constraints.Filter(func(match engine.ResourceMatch) bool {
+		service := match.Pattern.Service()
+		return service == serviceID || service == crn.Wildcard
+	})
 }
 
 // PrincipalFromContext returns the principal Handler resolved for this request.
