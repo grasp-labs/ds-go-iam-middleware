@@ -333,10 +333,10 @@ func TestLoadFiltersByService(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if d := set.Decide(engine.Request{Action: "file:getFile", Resource: resource(t, "projectx/app.json")}); !d.Allowed {
+	if d := set.Decide(engine.Request{Action: "file:getFile", Resource: resource(t, "projectx/app.json"), Tenant: tenantID}); !d.Allowed {
 		t.Errorf("file:getFile = denied (%s), want allowed: the scoped action survived filtering", d.Reason)
 	}
-	if d := set.Decide(engine.Request{Action: "file:getFile", Resource: resource(t, "projectx/secrets/db.json")}); d.Allowed {
+	if d := set.Decide(engine.Request{Action: "file:getFile", Resource: resource(t, "projectx/secrets/db.json"), Tenant: tenantID}); d.Allowed {
 		t.Error("file:getFile on secrets = allowed, want denied: the unscoped * deny must survive filtering")
 	}
 }

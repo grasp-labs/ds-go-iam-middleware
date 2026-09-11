@@ -72,6 +72,90 @@ func TestDecide(t *testing.T) {
 	}
 }
 
+// Decide must pass the principal's tenant to the engine, as Constrain does:
+// the tenant resolves the platform token and confines every pattern to the
+// caller. A platform-issued document written with the token has to answer for
+// whoever holds it, and must not reach another tenant's resources.
+func TestDecideResolvesTheTenantToken(t *testing.T) {
+	const other = "33333333-3333-4333-8333-333333333333"
+
+	set := []byte(`{
+		"principal_id": "user-1",
+		"policies": [{
+			"id": "6f0c1d2e-5a7b-4c8d-9e0f-1a2b3c4d5e6f",
+			"name": "platform-issued",
+			"version": "1.0.0",
+			"statements": [{
+				"sid": "read-own-files",
+				"effect": "allow",
+				"actions": ["file:getFile"],
+				"resources": ["crn:aic:*:file::file:**"]
+			}]
+		}]
+	}`)
+
+	ctx, err := NewTestContext(context.Background(),
+		Principal{ID: "user-1", TenantID: tenantID}, set)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if d := Decide(ctx, Request{Action: "file:getFile", Resource: resource(t, "reports/q1.csv")}); !d.Allowed {
+		t.Errorf("own resource = denied (%s), want allowed: the token must resolve to the caller", d.Reason)
+	}
+
+	foreign, err := crn.Build(other, ownerID, "file", "", "file", "reports/q1.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := Decide(ctx, Request{Action: "file:getFile", Resource: foreign}); d.Allowed {
+		t.Error("another tenant's resource = allowed, want denied: the token is not a wildcard")
+	}
+}
+
+// A published row is reachable on an allow for the action alone: publication is
+// the grant, so no pattern names the row. Without this a point read would refuse
+// a row the equivalent list returns.
+func TestDecidePublishedResourceNeedsNoPattern(t *testing.T) {
+	const platformTenant = "44444444-4444-4444-8444-444444444444"
+
+	set := []byte(`{
+		"principal_id": "user-1",
+		"policies": [{
+			"id": "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+			"name": "own-files-only",
+			"version": "1.0.0",
+			"statements": [{
+				"sid": "read-own-files",
+				"effect": "allow",
+				"actions": ["file:getFile"],
+				"resources": ["crn:aic:*:file::file:**"]
+			}]
+		}]
+	}`)
+
+	ctx, err := NewTestContext(context.Background(),
+		Principal{ID: "user-1", TenantID: tenantID}, set)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	published, err := crn.Build(platformTenant, ownerID, "file", "", "file", "catalog/shared.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if d := Decide(ctx, Request{Action: "file:getFile", Resource: published}); d.Allowed {
+		t.Error("unmarked platform row = allowed, want denied: no pattern reaches it")
+	}
+	if d := Decide(ctx, Request{Action: "file:getFile", Resource: published, ResourcePublished: true}); !d.Allowed {
+		t.Errorf("published platform row = denied (%s), want allowed: publication is the grant", d.Reason)
+	}
+	if d := Decide(ctx, Request{Action: "file:deleteFile", Resource: published, ResourcePublished: true}); d.Allowed {
+		t.Error("published row, ungranted action = allowed, want denied: publication is no action grant")
+	}
+}
+
 // The fixture allows file:listFiles over the whole tree where status is
 // "active" and denies everything under projectx/secrets/. Constraining for
 // listFiles must keep exactly those two, with the row-level status condition

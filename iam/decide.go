@@ -16,6 +16,15 @@ type Request struct {
 	// resource that would match a wildcard Allow. Build it with crn.Build.
 	Resource crn.CRN
 
+	// ResourcePublished reports that the row Resource names carries the
+	// platform's publication marker, the single-resource counterpart of
+	// sqlfilter.Mapping.Published. Publication is the grant, so an allow for the
+	// action suffices and no pattern need name the row; without this a point read
+	// would refuse a row the equivalent list returns.
+	//
+	// Set it from the stored row, never from client input.
+	ResourcePublished bool
+
 	// Context supplies request attributes that policy conditions test.
 	Context map[string]string
 }
@@ -119,10 +128,15 @@ func Decide(ctx context.Context, req Request) Decision {
 		return Decision{Reason: err.Error(), Err: err}
 	}
 
+	// Tenant is required: it resolves the platform ("aic") token and confines every
+	// pattern to the caller's tenant, exactly as it does for Constrain below. Omit
+	// it and no pattern matches, so every decision is an implicit deny.
 	d := set.Decide(engine.Request{
-		Action:   req.Action,
-		Resource: req.Resource,
-		Context:  req.Context,
+		Action:            req.Action,
+		Resource:          req.Resource,
+		ResourcePublished: req.ResourcePublished,
+		Tenant:            h.principal.TenantID,
+		Context:           req.Context,
 	})
 	// Info, not Debug: the deny rate is the signal watched during a rollout,
 	// and it must be visible at a production log level. Volume is bounded by
