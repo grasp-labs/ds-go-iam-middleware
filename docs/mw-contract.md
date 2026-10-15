@@ -50,7 +50,12 @@ The first `Decide` or `Constrain` call loads the compiled policy set for
 request reuse that set. Routes that make no authorization checks do not load
 policies.
 
-**`Guard[Result]`** binds an `Action` to a service-owned `Convert` function.
+**`Guard[Result]`** binds an `Action` to point checks and constraint conversion.
+Its `Require(ctx, req)` method calls `Decide` with the guard's action, replacing
+`req.Action` and preserving all other request fields. It returns `nil` for an
+allow, wraps `iam.ErrAccessDenied` for a denial, and returns decision errors
+unchanged. `Require` does not need a converter.
+
 Its `Constrain(ctx)` method calls `Constrain` without request attributes, then
 converts the complete constraints into a query scope or other result. The
 converter enforces the allow/deny constraints, including when no allow matches.

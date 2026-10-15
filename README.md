@@ -101,7 +101,7 @@ The buckets matter more than the sentinels. A request that could not be decided 
 
 | Error | Status | Meaning |
 |---|---|---|
-| `ErrAccessDenied` | 403 | A converter refused the requested access, such as a SQL filter with no applicable allow. |
+| `ErrAccessDenied` | 403 | The guard or converter refused access. |
 | `ErrNoPrincipal` | 401 | The request was never identified. |
 | `ErrTokenRejected` | 401 | IAM refused the forwarded token — usually expired since our own auth check. |
 | `ErrNoMiddleware` | 500 | `Decide` ran on a route that skipped `Handler`. A wiring bug. |
@@ -112,15 +112,20 @@ The buckets matter more than the sentinels. A request that could not be decided 
 
 ## Declarative guards
 
-`Guard[Result]` binds an action to a service-owned converter. It calls `Constrain`
-with no request attributes, then passes the complete constraints to `Convert`.
+`Guard[Result]` binds an action to point checks and a service-owned converter.
+`Require(ctx, req)` calls `Decide` with the guard's action, preserving other request
+fields. It returns `nil` for an allow, wraps `ErrAccessDenied` for a denial, and
+returns decision errors unchanged. It does not use `Convert`.
+
+`Constrain(ctx)` calls `Constrain` with no request attributes, then passes the
+complete constraints to `Convert`.
 The converter enforces the allow/deny patterns and produces the service's query
 scope or other result, including when no allow matches.
 
 Services can supply their own converters and specialize the guard in their
 `authz` package with `type Guard = iam.Guard[repo.Scope]`.
 
-Set both fields before use, supply a non-nil converter, and do not modify shared
+Set `Action` and, for `Constrain`, a non-nil `Convert`. Do not modify shared
 guards. A policy resolution failure skips conversion and returns the result's
 zero value and the error from `Constrain`. Converter results and errors pass
 through unchanged. Use `Constrain` directly when request attributes are needed; keep

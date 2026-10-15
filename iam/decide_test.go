@@ -155,6 +155,13 @@ func TestDecidePublishedResourceNeedsNoPattern(t *testing.T) {
 	if d := Decide(ctx, Request{Action: "file:deleteFile", Resource: published, ResourcePublished: true}); d.Allowed {
 		t.Error("published row, ungranted action = allowed, want denied: publication is no action grant")
 	}
+	guard := Guard[struct{}]{Action: "file:getFile"}
+	for _, marked := range []bool{false, true} {
+		err := guard.Require(ctx, Request{Resource: published, ResourcePublished: marked})
+		if marked && err != nil || !marked && !errors.Is(err, ErrAccessDenied) {
+			t.Errorf("Require with ResourcePublished = %v: got %v", marked, err)
+		}
+	}
 }
 
 // The fixture allows file:listFiles over the whole tree where status is
@@ -325,7 +332,11 @@ func TestPolicyResolutionErrors(t *testing.T) {
 			}{
 				{"Decide", decision.Err},
 				{"Constrain", constrainErr},
+				{"Require", (Guard[struct{}]{Action: "file:getFile"}).Require(ctx, Request{Resource: resource(t, "projectx/app.json")})},
 			} {
+				if errors.Is(result.err, ErrAccessDenied) {
+					t.Errorf("%s marked a policy resolution failure as access denied: %v", result.name, result.err)
+				}
 				if !errors.Is(result.err, ErrPolicyResolution) {
 					t.Errorf("%s error = %v, want ErrPolicyResolution", result.name, result.err)
 				}

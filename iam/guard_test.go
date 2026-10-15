@@ -9,6 +9,88 @@ import (
 	"github.com/grasp-labs/ds-go-policy/engine"
 )
 
+func TestGuardRequire(t *testing.T) {
+	ctx, err := NewTestContext(t.Context(),
+		Principal{ID: "user-1", TenantID: tenantID}, fixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		action string
+		req    Request
+		reason string
+	}{
+		{"allow overrides request action", "file:getFile", Request{
+			Action: "file:shareFile", Resource: resource(t, "projectx/app.json"),
+			Context: map[string]string{"status": "active"},
+		}, ""},
+		{"deny overrides request action", "file:shareFile", Request{
+			Action: "file:getFile", Resource: resource(t, "projectx/app.json"),
+			Context: map[string]string{"status": "active"},
+		}, "implicit deny"},
+		{"condition fails", "file:getFile", Request{
+			Resource: resource(t, "projectx/app.json"), Context: map[string]string{"status": "archived"},
+		}, "implicit deny"},
+		{"explicit deny", "file:updateFile", Request{
+			Resource: resource(t, "projectx/secrets/db.json"),
+		}, "protect-projectx-secrets"},
+		{"outside granted prefix", "file:updateFile", Request{
+			Resource: resource(t, "other/app.json"),
+		}, "implicit deny"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			guard := Guard[struct{}]{Action: tc.action}
+			err := guard.Require(ctx, tc.req)
+			if tc.reason == "" {
+				if err != nil {
+					t.Fatalf("Require = %v, want nil", err)
+				}
+				return
+			}
+			want := "iam: access denied: action " + tc.action + ": " + tc.reason
+			if !errors.Is(err, ErrAccessDenied) || err.Error() != want {
+				t.Fatalf("Require = %v, want %q wrapping ErrAccessDenied", err, want)
+			}
+		})
+	}
+
+	guard := Guard[struct{}]{
+		Action: "file:updateFile",
+		Convert: func(engine.Constraints) (struct{}, error) {
+			t.Fatal("Require called converter")
+			return struct{}{}, nil
+		},
+	}
+	if err := guard.Require(ctx, Request{Resource: resource(t, "projectx/app.json")}); err != nil {
+		t.Fatalf("Require = %v, want nil", err)
+	}
+}
+
+func TestGuardRequireWithoutPrincipal(t *testing.T) {
+	withoutPrincipal, err := NewTestContext(t.Context(), Principal{}, fixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want error
+	}{
+		{"missing middleware", t.Context(), ErrNoMiddleware},
+		{"missing principal", withoutPrincipal, ErrNoPrincipal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			guard := Guard[struct{}]{Action: "file:getFile"}
+			err := guard.Require(tc.ctx, Request{Resource: resource(t, "projectx/app.json")})
+			if !errors.Is(err, tc.want) || errors.Is(err, ErrAccessDenied) {
+				t.Fatalf("Require = %v, want %v without ErrAccessDenied", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestGuardConstrain(t *testing.T) {
 	ctx, err := NewTestContext(t.Context(),
 		Principal{ID: "user-1", TenantID: tenantID}, fixture(t))
