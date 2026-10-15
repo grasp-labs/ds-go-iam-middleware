@@ -2,6 +2,7 @@ package iam
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/grasp-labs/ds-go-policy/crn"
@@ -104,7 +105,7 @@ func (h *holder) load(ctx context.Context) (*engine.Compiled, error) {
 	if h.set == nil {
 		set, err := h.mw.load(ctx, h.principal.TenantID, h.principal.ID, h.authorization)
 		if err != nil {
-			return nil, err
+			return nil, errors.Join(ErrPolicyResolution, err)
 		}
 		h.set = set
 	}

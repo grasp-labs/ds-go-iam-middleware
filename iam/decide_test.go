@@ -2,6 +2,7 @@ package iam
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -274,6 +275,68 @@ func TestConstrainFiltersResourcesByService(t *testing.T) {
 			}
 			if got := constraintServices(constraints.Deny); !slices.Equal(got, test.wantDeny) {
 				t.Errorf("deny services = %v, want %v", got, test.wantDeny)
+			}
+		})
+	}
+}
+
+func TestPolicyResolutionErrors(t *testing.T) {
+	fetchErr := errors.New("fetch failed")
+	for _, tc := range []struct {
+		name       string
+		raw        string
+		fetchErr   error
+		wantCause  error
+		wantSyntax bool
+	}{
+		{"fetch failure", "", fetchErr, fetchErr, false},
+		{"source unavailable", "", ErrPolicySourceUnavailable, ErrPolicySourceUnavailable, false},
+		{"token rejected", "", ErrTokenRejected, ErrTokenRejected, false},
+		{"principal rejected", "", ErrPrincipalRejected, ErrPrincipalRejected, false},
+		{"mismatched principal", `{"principal_id":"other","policies":[]}`, nil, ErrPolicySetMismatch, false},
+		{"invalid JSON", `{`, nil, nil, true},
+		{"invalid policy", `{"principal_id":"user-1","policies":[{"statements":[{"effect":"allow","actions":["file:*"],"resources":["malformed"]}]}]}`, nil, engine.ErrInvalidPattern, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := New(Config{
+				Fetcher:         &flakyFetcher{raw: []byte(tc.raw), fail: tc.fetchErr},
+				Cache:           NewMapCache(),
+				CacheLifeWindow: DefaultCacheMaxStale,
+				Principal: func(context.Context) (Principal, error) {
+					return Principal{ID: "user-1", TenantID: tenantID}, nil
+				},
+				Logger: slog.New(slog.DiscardHandler),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := m.newContext(t.Context(), "")
+			decision := Decide(ctx, Request{Action: "file:getFile", Resource: resource(t, "projectx/app.json")})
+			if decision.Allowed {
+				t.Fatal("policy resolution failure allowed access")
+			}
+			constraints, constrainErr := Constrain(ctx, "file:listFiles", nil)
+			if len(constraints.Allow) != 0 || len(constraints.Deny) != 0 {
+				t.Fatalf("policy resolution failure returned constraints: %+v", constraints)
+			}
+			for _, result := range []struct {
+				name string
+				err  error
+			}{
+				{"Decide", decision.Err},
+				{"Constrain", constrainErr},
+			} {
+				if !errors.Is(result.err, ErrPolicyResolution) {
+					t.Errorf("%s error = %v, want ErrPolicyResolution", result.name, result.err)
+				}
+				if tc.wantCause != nil && !errors.Is(result.err, tc.wantCause) {
+					t.Errorf("%s error = %v, want cause %v", result.name, result.err, tc.wantCause)
+				}
+				if tc.wantSyntax {
+					if _, ok := errors.AsType[*json.SyntaxError](result.err); !ok {
+						t.Errorf("%s error = %v, want JSON syntax error", result.name, result.err)
+					}
+				}
 			}
 		})
 	}

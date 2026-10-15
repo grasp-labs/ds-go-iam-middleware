@@ -13,11 +13,16 @@ Policy semantics live in [ds-go-policy](https://github.com/grasp-labs/ds-go-poli
 ## Wiring
 
 ```go
+import (
+    "github.com/grasp-labs/ds-go-iam-middleware/adapter/echoiam"
+    "github.com/grasp-labs/ds-go-iam-middleware/iam"
+)
+
 authz, err := iam.New(iam.Config{
     Fetcher:         &iam.HTTPFetcher{BaseURL: cfg.IAMURL},
     Cache:           app.Cache,       // your *bigcache.BigCache
     CacheLifeWindow: cacheLifeWindow, // the LifeWindow app.Cache was built with
-    Principal:       iamPrincipal,
+    Principal:       echoiam.ResolvePrincipal,
 })
 if err != nil {
     return err
@@ -33,19 +38,9 @@ e.Use(authz.Handler())
 
 `Handler` captures the request's `Authorization` header and forwards it verbatim when the principal's policies are fetched, so the IAM API's own tenant scoping applies and the service configures no credentials for this middleware.
 
-With [ds-go-echo-middleware](https://github.com/grasp-labs/ds-go-echo-middleware), the authentication middleware has already normalised the token into a principal, so the adapter is:
+With [ds-go-echo-middleware v3](https://github.com/grasp-labs/ds-go-echo-middleware), use `echoiam.ResolvePrincipal` as shown above. It reads the normalized identity from `requestctx.GetPrincipal`, preserves the subject verbatim, and converts the tenant UUID to a string. A missing identity, empty subject, or zero tenant returns `iam.ErrNoPrincipal`. It reads only the normalized principal; legacy claims alone do not satisfy it.
 
-```go
-func iamPrincipal(ctx context.Context) (iam.Principal, error) {
-    p, ok := requestctx.GetPrincipal(ctx)
-    if !ok {
-        return iam.Principal{}, iam.ErrNoPrincipal
-    }
-    return iam.Principal{ID: p.ID, TenantID: p.TenantID.String()}, nil
-}
-```
-
-`p.ID` is the token's `sub` — the same value the IAM API keys a principal by — and `p.TenantID` is parsed from `rsc` during authentication, so a token that fails to yield a tenant never reaches this middleware. Order the stack accordingly: request id, authentication, then `authz.Handler()`.
+The adapter does not authenticate requests or fetch policies. Order the stack accordingly: request id, authentication, then `authz.Handler()`. Services using another authentication implementation can continue supplying their own `Config.Principal` callback.
 
 ## Handlers
 
@@ -106,18 +101,83 @@ The buckets matter more than the sentinels. A request that could not be decided 
 
 | Error | Status | Meaning |
 |---|---|---|
+| `ErrAccessDenied` | 403 | A converter refused the requested access, such as a SQL filter with no applicable allow. |
 | `ErrNoPrincipal` | 401 | The request was never identified. |
 | `ErrTokenRejected` | 401 | IAM refused the forwarded token — usually expired since our own auth check. |
 | `ErrNoMiddleware` | 500 | `Decide` ran on a route that skipped `Handler`. A wiring bug. |
 | `ErrPrincipalRejected` | 500 | IAM will not accept the principal id. Permanent; retrying cannot fix it. |
 | `ErrPolicySourceUnavailable` | 503 | Transport failure, `429`, or `5xx` — and no cached set young enough to serve stale. |
 | `ErrPolicySetMismatch` | 503 | IAM answered with another principal's set. |
+| `ErrPolicyResolution` | 503 fallback | `Decide` and `Constrain` wrap policy fetch, decode, and compile failures. Check the specific errors above first; causes remain available through `errors.Is` and `errors.As`. |
+
+## Declarative guards
+
+`Guard[Result]` binds an action to a service-owned converter. It calls `Constrain`
+with no request attributes, then passes the complete constraints to `Convert`.
+The converter enforces the allow/deny patterns and produces the service's query
+scope or other result, including when no allow matches.
+
+Services can supply their own converters and specialize the guard in their
+`authz` package with `type Guard = iam.Guard[repo.Scope]`.
+
+Set both fields before use, supply a non-nil converter, and do not modify shared
+guards. A policy resolution failure skips conversion and returns the result's
+zero value and the error from `Constrain`. Converter results and errors pass
+through unchanged. Use `Constrain` directly when request attributes are needed; keep
+checks on proposed write values and service-specific tracing in the service.
+
+## GORM scopes
+
+`adapter/gormfilter` provides the shared SQL-to-GORM converter. The service owns
+the `sqlfilter.Mapping`, including its resource columns, condition allowlist, and
+publication rules:
+
+```go
+import (
+    "github.com/grasp-labs/ds-go-iam-middleware/adapter/gormfilter"
+    "github.com/grasp-labs/ds-go-iam-middleware/iam"
+)
+
+var listGuard = iam.Guard[gormfilter.Scope]{
+    Action:  "config:listDataset",
+    Convert: gormfilter.Via(datasetMapping),
+}
+
+scope, err := listGuard.Constrain(ctx)
+if err != nil {
+    return err // map errors.Is(err, iam.ErrAccessDenied) to 403
+}
+db.Scopes(scope).Find(&datasets)
+```
+
+`Scope` is an alias of `func(*gorm.DB) *gorm.DB`. Services can use the same alias
+for their repository scopes. Apply the scope to counts and writes as well as
+reads, alongside any additional service restrictions.
+
+For a service that assembles its own predicate, `Bind` applies the completed SQL
+to the supplied query:
+
+```go
+scope, err := gormfilter.Bind(where, args...)
+```
+
+Check SQL generation errors before calling `Bind`. SQL must come from trusted
+code; values go through the heterogeneous `args ...any`. Both helpers group the
+predicate so additional filters cannot widen an `OR` grant. They return
+`iam.ErrAccessDenied` for the closed clause identified by `sqlfilter.IsClosed`.
+Empty SQL is rejected as invalid input, and translation errors pass through
+unchanged. `Bind` does not parse or validate arbitrary SQL.
+
+Custom converters and point-check wrappers can use the same `iam.ErrAccessDenied`
+for permission denials. Policy-loading failures wrap `ErrPolicyResolution` and
+their original cause. Ordinary `Decide` denials still have `Allowed: false` and
+`Err: nil`.
 
 ## How it works
 
 Two cache layers. `Cache` (bigcache) holds raw policy JSON, keyed by principal. An in-process map holds `*engine.Compiled`, keyed by a content hash of the response. The second layer is not an optimisation: `Cache` stores bytes, so without it every cache *hit* would re-run `Unmarshal` and `engine.Compile`. The hash rather than the `ETag` is deliberate — that map is shared by every principal in the process, and equal bytes are safe to share where equal validators would not be.
 
-Lazy. `Handler` does no I/O. Policies load on the first `Decide`, so routes that authorize nothing cost nothing and survive an IAM outage.
+Lazy. `Handler` does no I/O. Policies load on the first `Decide` or `Constrain`, so routes that authorize nothing cost nothing and survive an IAM outage.
 
 Deduplicated. Cold lookups for the same principal collapse via `singleflight`, detached from the request so a client disconnect cannot cancel a fetch others are waiting on.
 

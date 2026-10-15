@@ -22,13 +22,9 @@ policy. One library, one behavior, in every service.
 
 ## Surface
 
-The library exposes three things, split so the fetch/cache concern and the
-decision concern sit where each belongs.
-
 **The resolver middleware** runs on every protected route. It resolves the
-compiled policy set for `(tenant, sub)` — from cache or from the policy
-source — and stores it in the request context. It makes no decision by itself; a principal
-with an empty set passes through and every later check denies.
+principal and captures the caller's `Authorization` header in the request
+context. It does no I/O and makes no decision.
 
 **`Decide`** is the point check, called in the handler at the moment the
 resource CRN is known:
@@ -49,9 +45,28 @@ patterns for an action, which a storage adapter (e.g. `sqlfilter`) turns into
 a WHERE clause. Point checks and list filters share one matcher, so they can
 never disagree. A list endpoint must never loop `Decide` over rows.
 
-Both calls read the compiled set the resolver stored in context — after the
-resolver has run, a decision is a pure in-memory evaluation with no I/O on the
-request path.
+The first `Decide` or `Constrain` call loads the compiled policy set for
+`(tenant, sub)` from cache or the policy source. Later checks in the same
+request reuse that set. Routes that make no authorization checks do not load
+policies.
+
+**`Guard[Result]`** binds an `Action` to a service-owned `Convert` function.
+Its `Constrain(ctx)` method calls `Constrain` without request attributes, then
+converts the complete constraints into a query scope or other result. The
+converter enforces the allow/deny constraints, including when no allow matches.
+Policy resolution failures skip conversion; converter results pass through unchanged.
+
+**`adapter/gormfilter`** binds a SQL predicate to the supplied GORM query, keeping
+the predicate grouped with other query restrictions. `Via(mapping)` translates
+constraints through `sqlfilter.Where` and delegates to `Bind(sql, args...)`.
+Services retain their mappings and custom predicate preparation. `Scope` is an
+alias of `func(*gorm.DB) *gorm.DB`.
+
+The adapter returns `iam.ErrAccessDenied` for a closed SQL filter. This shared
+sentinel represents a permission denial and maps to 403; invalid input and SQL
+translation failures remain separate errors. Custom converters can return the
+same sentinel. It does not change `Decide`, which reports ordinary denials as
+`Allowed: false` with no error.
 
 ## Data plane
 
