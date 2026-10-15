@@ -195,9 +195,9 @@ e.Use(authentication, echoiam.Audit(publisher), authz.Handler())
 ```
 
 The adapter observes `iam.Decide`, failed `iam.Constrain` calls, and completed
-`iam.Guard.Constrain` conversions. It publishes the last failed check when the
-request finishes with a failed HTTP status; a later successful check clears an
-earlier refusal. Use guards to include converter denials and errors. Calling
+`iam.Guard.Constrain` conversions. It publishes a failed final IAM outcome when
+the request finishes with a failed HTTP status. A later successful check clears
+an earlier refusal. Use guards to include converter denials and errors. Calling
 `iam.Constrain` and converting its result yourself only observes policy-loading
 failures. Unrelated HTTP errors and successful requests emit no authorization
 event. Existing authentication middleware continues to own login events.
@@ -209,7 +209,13 @@ Events use the SDK `EventJson` envelope. `authz.denied` covers policy denials,
 concrete `resource` CRN. Identity comes from the verified principal. The path is
 the Echo route pattern, without query parameters or tokens. Request and session
 IDs are preserved; metadata is an empty object and the envelope checksum is the
-MD5 of the serialized payload.
+MD5 of the serialized payload. A non-empty `X-Message` header is preserved in the
+envelope's optional `message` field, as in the entitlement middleware.
+
+The adapter uses the written response status when available. For returned errors,
+it follows Echo's default error handler, including treating wrapped errors as
+HTTP 500. Custom error handling must write the response before returning for its
+status to be reflected in the event.
 
 Publishing is asynchronous and best effort, with a three-second timeout detached
 from request cancellation. Send errors are logged and never change the HTTP

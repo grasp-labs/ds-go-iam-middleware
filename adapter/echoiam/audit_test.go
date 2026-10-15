@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -65,6 +66,76 @@ func auditGuard(ctx context.Context, convertErr error) error {
 	return err
 }
 
+func TestAuditServeHTTPStatus(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		err       error
+		committed int
+		want      int
+		message   string
+	}{
+		{"direct Echo error", echo.ErrForbidden, 0, http.StatusForbidden, "opening the report"},
+		{"wrapped Echo error", fmt.Errorf("request failed: %w", echo.ErrForbidden), 0, http.StatusInternalServerError, ""},
+		{"custom status error", &auditStatusError{http.StatusServiceUnavailable, iam.ErrAccessDenied}, 0, http.StatusInternalServerError, ""},
+		{"nested Echo error", echo.NewHTTPError(http.StatusInternalServerError).SetInternal(echo.ErrForbidden), 0, http.StatusForbidden, ""},
+		{"committed status wins", echo.ErrInternalServerError, http.StatusForbidden, http.StatusForbidden, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			events := make(chan sdkmodels.EventJson, 1)
+			publisher, err := audit.New(auditProducer{events: events}, "compliance", "ds.core.file.v2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := echo.New()
+			e.Use(echoiam.Audit(publisher))
+			e.GET("/files/:id", func(c echo.Context) error {
+				_ = auditGuard(c.Request().Context(), iam.ErrAccessDenied)
+				if test.committed != 0 {
+					if err := c.NoContent(test.committed); err != nil {
+						return err
+					}
+				}
+				return test.err
+			})
+			ctx := auditContext(t, `{"principal_id":"alice","policies":[]}`)
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/files/original", nil)
+			if test.message != "" {
+				req.Header.Set("X-Message", test.message)
+			}
+			e.ServeHTTP(recorder, req)
+			if recorder.Code != test.want {
+				t.Fatalf("HTTP status = %d, want %d", recorder.Code, test.want)
+			}
+			select {
+			case event := <-events:
+				body, err := json.Marshal(event.Payload)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var payload struct {
+					StatusCode int `json:"status_code"`
+				}
+				if err := json.Unmarshal(body, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if payload.StatusCode != recorder.Code {
+					t.Fatalf("audit status = %d, HTTP status = %d", payload.StatusCode, recorder.Code)
+				}
+				if test.message == "" {
+					if event.Message != nil {
+						t.Fatalf("message = %q without X-Message header", *event.Message)
+					}
+				} else if event.Message == nil || *event.Message != test.message {
+					t.Fatalf("message = %v, want %q", event.Message, test.message)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("authorization event was not published")
+			}
+		})
+	}
+}
+
 func TestAuditFinalIAMOutcome(t *testing.T) {
 	for _, test := range []struct {
 		name       string
@@ -95,7 +166,7 @@ func TestAuditFinalIAMOutcome(t *testing.T) {
 		{"returned policy source error", "{", func(c echo.Context) error {
 			err := auditGuard(c.Request().Context(), nil)
 			return &auditStatusError{http.StatusServiceUnavailable, err}
-		}, "authz.error", http.StatusServiceUnavailable},
+		}, "authz.error", http.StatusInternalServerError},
 		{"converter error", "", func(c echo.Context) error {
 			_ = auditGuard(c.Request().Context(), errors.New("unsupported mapping"))
 			return c.NoContent(http.StatusInternalServerError)
@@ -225,6 +296,7 @@ func TestAuditSnapshotsEchoContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(auditContext(t, `{"principal_id":"alice","policies":[]}`))
 	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/files/original", nil)
 	req.Header.Set("User-Agent", "original-agent")
+	req.Header.Set("X-Message", "original-message")
 	req.RemoteAddr = "192.0.2.1:1234"
 	c := echo.New().NewContext(req, httptest.NewRecorder())
 	c.SetPath("/files/:id")
@@ -234,6 +306,7 @@ func TestAuditSnapshotsEchoContext(t *testing.T) {
 	})(c); err != nil {
 		t.Fatal(err)
 	}
+	req.Header.Set("X-Message", "changed-message")
 	c.SetPath("/reused")
 	c.SetRequest(httptest.NewRequest(http.MethodPost, "/reused", nil))
 	cancel()
@@ -247,6 +320,9 @@ func TestAuditSnapshotsEchoContext(t *testing.T) {
 		}
 		if payload["path"] != "/files/:id" || payload["user_agent"] != "original-agent" || payload["remote_addr"] != "192.0.2.1:1234" || event.CreatedBy != "alice" {
 			t.Fatalf("event used a reused Echo context: %+v", event)
+		}
+		if event.Message == nil || *event.Message != "original-message" {
+			t.Fatalf("event did not snapshot X-Message: %v", event.Message)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("canceled request prevented audit delivery")

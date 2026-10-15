@@ -40,6 +40,7 @@ type Event struct {
 	TenantID, RequestID, SessionID       uuid.UUID
 	Subject, Path, UserAgent, RemoteAddr string
 	Action, Resource, Reason             string
+	Message                              string
 	StatusCode                           int
 	Err                                  error
 }
@@ -95,11 +96,15 @@ func (p *Publisher) Publish(ctx context.Context, event Event) error {
 	if event.SessionID == uuid.Nil {
 		event.SessionID = uuid.New()
 	}
+	var message *string
+	if event.Message != "" {
+		message = new(event.Message)
+	}
 	envelope := models.EventJson{
 		Id: uuid.New(), TenantId: event.TenantID, RequestId: event.RequestID, SessionId: event.SessionID,
 		Timestamp: time.Now().UTC(), EventType: eventType, EventSource: p.source,
 		CreatedBy: cmp.Or(event.Subject, p.source), Metadata: map[string]string{},
-		Md5Hash: hex.EncodeToString(checksum[:]), Payload: body,
+		Md5Hash: hex.EncodeToString(checksum[:]), Payload: body, Message: message,
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()

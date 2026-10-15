@@ -1,7 +1,6 @@
 package echoiam
 
 import (
-	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -13,8 +12,9 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// Audit publishes the last unsuccessful IAM check when the request fails. Wire
-// it after authentication and before the IAM handler. It does not write responses.
+// Audit publishes a failed final IAM outcome when the request fails. A later
+// successful check clears an earlier failure. Wire it after authentication and
+// before the IAM handler. It does not write responses.
 func Audit(publisher *audit.Publisher) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -30,21 +30,7 @@ func Audit(publisher *audit.Publisher) echo.MiddlewareFunc {
 			})
 			c.SetRequest(c.Request().WithContext(ctx))
 			err := next(c)
-			status := c.Response().Status
-			if !c.Response().Committed && err != nil {
-				status = http.StatusInternalServerError
-				if statusErr, ok := errors.AsType[interface {
-					error
-					Status() int
-				}](err); ok {
-					status = statusErr.Status()
-				} else if httpErr, ok := errors.AsType[*echo.HTTPError](err); ok {
-					if internal, ok := httpErr.Internal.(*echo.HTTPError); ok {
-						httpErr = internal
-					}
-					status = httpErr.Code
-				}
-			}
+			status := responseStatus(c, err)
 
 			mu.Lock()
 			req, result, refused := request, decision, failed
@@ -64,6 +50,7 @@ func Audit(publisher *audit.Publisher) echo.MiddlewareFunc {
 				SessionID: requestctx.GetOrNewSessionUUID(ctx),
 				Path:      c.Path(), UserAgent: c.Request().UserAgent(), RemoteAddr: c.Request().RemoteAddr,
 				Action: req.Action, Resource: resource, Reason: result.Reason,
+				Message:    c.Request().Header.Get("X-Message"),
 				StatusCode: status, Err: result.Err,
 			}
 			// shortcut: sends are not drained at shutdown; add a service-owned flush if durable delivery is required.
@@ -75,4 +62,19 @@ func Audit(publisher *audit.Publisher) echo.MiddlewareFunc {
 			return err
 		}
 	}
+}
+
+func responseStatus(c echo.Context, err error) int {
+	if c.Response().Committed || err == nil {
+		return c.Response().Status
+	}
+	// Match Echo's default error handler, which does not unwrap errors.
+	httpErr, ok := err.(*echo.HTTPError)
+	if !ok {
+		return http.StatusInternalServerError
+	}
+	if internal, ok := httpErr.Internal.(*echo.HTTPError); ok {
+		httpErr = internal
+	}
+	return httpErr.Code
 }

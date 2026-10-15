@@ -45,6 +45,7 @@ func TestPublishEventContract(t *testing.T) {
 				TenantID: uuid.New(), RequestID: uuid.New(), SessionID: uuid.New(),
 				Subject: "user@example.com", Path: "/file/:id/", UserAgent: "audit-test", RemoteAddr: "192.0.2.1:1234",
 				Action: "file:getFile", Resource: "crn:tenant:*:file::file:reports/a.pdf", Reason: "matched policy",
+				Message:    "requested financial report",
 				StatusCode: tt.status, Err: tt.err,
 			}
 			var encoded []byte
@@ -73,6 +74,9 @@ func TestPublishEventContract(t *testing.T) {
 			}
 			if envelope.EventType != tt.eventType || envelope.EventSource != source || envelope.CreatedBy != event.Subject {
 				t.Errorf("incorrect event identity: %+v", envelope)
+			}
+			if envelope.Message == nil || *envelope.Message != event.Message {
+				t.Errorf("message = %v, want %q", envelope.Message, event.Message)
 			}
 			if envelope.Metadata == nil || len(envelope.Metadata) != 0 {
 				t.Errorf("metadata = %#v, want empty object", envelope.Metadata)
@@ -112,6 +116,13 @@ func TestPublishUnknownIdentityAndCollectionScope(t *testing.T) {
 		data, err := json.Marshal(value)
 		if err != nil {
 			return err
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return err
+		}
+		if _, present := fields["message"]; present {
+			t.Error("empty message must be omitted from the envelope")
 		}
 		var event models.EventJson
 		if err := json.Unmarshal(data, &event); err != nil {
