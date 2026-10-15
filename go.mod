@@ -4,6 +4,7 @@ go 1.26.2
 
 require (
 	github.com/google/uuid v1.6.0
+	github.com/grasp-labs/ds-event-stream-go-sdk v1.1.0
 	github.com/grasp-labs/ds-go-echo-middleware/v3 v3.2.1
 	github.com/grasp-labs/ds-go-policy v1.7.0
 	github.com/labstack/echo/v4 v4.15.4

@@ -116,7 +116,8 @@ func (h *holder) load(ctx context.Context) (*engine.Compiled, error) {
 //
 // It returns no error: every failure is a Decision with Allowed false, so no
 // error path can be mistaken for permission.
-func Decide(ctx context.Context, req Request) Decision {
+func Decide(ctx context.Context, req Request) (decision Decision) {
+	defer func() { observeDecision(ctx, req, decision) }()
 	h, ok := ctx.Value(ctxKey{}).(*holder)
 	if !ok {
 		return Decision{Reason: ErrNoMiddleware.Error(), Err: ErrNoMiddleware}
@@ -168,6 +169,7 @@ func Decide(ctx context.Context, req Request) Decision {
 func Constrain(ctx context.Context, action string, attrs map[string]string) (engine.Constraints, error) {
 	h, ok := ctx.Value(ctxKey{}).(*holder)
 	if !ok {
+		observeDecision(ctx, Request{Action: action}, Decision{Reason: ErrNoMiddleware.Error(), Err: ErrNoMiddleware})
 		return engine.Constraints{}, ErrNoMiddleware
 	}
 
@@ -175,6 +177,7 @@ func Constrain(ctx context.Context, action string, attrs map[string]string) (eng
 	if err != nil {
 		h.mw.cfg.Logger.Error("iam: cannot constrain",
 			"principal_id", h.principal.ID, "action", action, "error", err)
+		observeDecision(ctx, Request{Action: action}, Decision{Reason: err.Error(), Err: err})
 		return engine.Constraints{}, err
 	}
 

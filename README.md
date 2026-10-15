@@ -178,6 +178,44 @@ for permission denials. Policy-loading failures wrap `ErrPolicyResolution` and
 their original cause. Ordinary `Decide` denials still have `Allowed: false` and
 `Err: nil`.
 
+## Authorization audit events
+
+Create one publisher with the service's existing Kafka producer, compliance
+topic, and event source, then install the Echo adapter after authentication and
+before `authz.Handler()`:
+
+```go
+import "github.com/grasp-labs/ds-go-iam-middleware/audit"
+
+publisher, err := audit.New(producer, complianceTopic, "ds.core.file.v1")
+if err != nil {
+    return err
+}
+e.Use(authentication, echoiam.Audit(publisher), authz.Handler())
+```
+
+The adapter observes `iam.Decide`, failed `iam.Constrain` calls, and completed
+`iam.Guard.Constrain` conversions. It publishes the last failed check when the
+request finishes with a failed HTTP status; a later successful check clears an
+earlier refusal. Use guards to include converter denials and errors. Calling
+`iam.Constrain` and converting its result yourself only observes policy-loading
+failures. Unrelated HTTP errors and successful requests emit no authorization
+event. Existing authentication middleware continues to own login events.
+
+Events use the SDK `EventJson` envelope. `authz.denied` covers policy denials,
+`ErrAccessDenied`, `ErrNoPrincipal`, and `ErrTokenRejected`; other failures use
+`authz.error`. The payload preserves `status_code`, `subject`, `error` (nullable),
+`path`, `user_agent`, and `remote_addr`, and adds `action`, `reason`, and an optional
+concrete `resource` CRN. Identity comes from the verified principal. The path is
+the Echo route pattern, without query parameters or tokens. Request and session
+IDs are preserved; metadata is an empty object and the envelope checksum is the
+MD5 of the serialized payload.
+
+Publishing is asynchronous and best effort, with a three-second timeout detached
+from request cancellation. Send errors are logged and never change the HTTP
+response. Pending sends are not drained at shutdown. The framework-independent
+`audit.Publisher.Publish` method sends synchronously for other adapters.
+
 ## How it works
 
 Two cache layers. `Cache` (bigcache) holds raw policy JSON, keyed by principal. An in-process map holds `*engine.Compiled`, keyed by a content hash of the response. The second layer is not an optimisation: `Cache` stores bytes, so without it every cache *hit* would re-run `Unmarshal` and `engine.Compile`. The hash rather than the `ETag` is deliberate — that map is shared by every principal in the process, and equal bytes are safe to share where equal validators would not be.

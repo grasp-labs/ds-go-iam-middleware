@@ -40,5 +40,11 @@ func (g Guard[Result]) Constrain(ctx context.Context) (Result, error) {
 		return zero, err
 	}
 
-	return g.Convert(constraints)
+	result, err := g.Convert(constraints)
+	decision := Decision{Allowed: err == nil, Err: err}
+	if err != nil {
+		decision.Reason = err.Error()
+	}
+	observeDecision(ctx, Request{Action: g.Action}, decision)
+	return result, err
 }
