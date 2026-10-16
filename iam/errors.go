@@ -3,12 +3,20 @@ package iam
 import "errors"
 
 var (
+	// ErrAccessDenied means the requested access is not permitted. Map it to 403;
+	// failures to load or evaluate policies must remain separate errors.
+	ErrAccessDenied = errors.New("iam: access denied")
+
 	// ErrNoPrincipal means the request was never identified. Map it to 401.
 	ErrNoPrincipal = errors.New("iam: no principal in context")
 
 	// ErrNoMiddleware means Decide ran on a route that skipped Handler. A
 	// wiring bug: map it to 500, not 403.
 	ErrNoMiddleware = errors.New("iam: middleware not installed")
+
+	// ErrPolicyResolution marks policy fetch, decode, or compile failures while
+	// preserving their causes. Check specific errors first; otherwise map to 503.
+	ErrPolicyResolution = errors.New("iam: policy resolution failed")
 
 	// ErrPolicySourceUnavailable means the policy set could not be reached and
 	// the request cannot be decided. An outage, not a denial: map it to 503 so
