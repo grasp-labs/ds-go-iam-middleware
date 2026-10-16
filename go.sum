@@ -3,6 +3,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/grasp-labs/ds-event-stream-go-sdk v1.1.0 h1:+6GM9q3iIwyrMIg/wIKpbg+22mEX7bdshHfGmiLHv4g=
+github.com/grasp-labs/ds-event-stream-go-sdk v1.1.0/go.mod h1:AIOwCEy5LWCLAhlQ8SlcLphFtwPBiZsxf4o2YpJMS8I=
 github.com/grasp-labs/ds-go-echo-middleware/v3 v3.2.1 h1:Ik/sZDtAw4p0DszKH8a5hO777W8PT9zM/CnYjBv835A=
 github.com/grasp-labs/ds-go-echo-middleware/v3 v3.2.1/go.mod h1:4HWUiNpObFLSXkNTKXKINU0Zuthfyg0bnm66fV6rQZ0=
 github.com/grasp-labs/ds-go-policy v1.7.0 h1:Aelf6xeMXg/s+/8k89eH24MfZK3aJSDjh53Yk89bQaU=
