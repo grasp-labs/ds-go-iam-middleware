@@ -1,5 +1,5 @@
-// Package echoiam adapts identities from ds-go-echo-middleware v3 for IAM.
-package echoiam
+// Package principal adapts authenticated identities from request contexts for IAM.
+package principal
 
 import (
 	"context"

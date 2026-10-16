@@ -14,7 +14,7 @@ Policy semantics live in [ds-go-policy](https://github.com/grasp-labs/ds-go-poli
 
 ```go
 import (
-    "github.com/grasp-labs/ds-go-iam-middleware/adapter/echoiam"
+    "github.com/grasp-labs/ds-go-iam-middleware/adapter/principal"
     "github.com/grasp-labs/ds-go-iam-middleware/iam"
 )
 
@@ -22,7 +22,7 @@ authz, err := iam.New(iam.Config{
     Fetcher:         &iam.HTTPFetcher{BaseURL: cfg.IAMURL},
     Cache:           app.Cache,       // your *bigcache.BigCache
     CacheLifeWindow: cacheLifeWindow, // the LifeWindow app.Cache was built with
-    Principal:       echoiam.ResolvePrincipal,
+    Principal:       principal.ResolvePrincipal,
 })
 if err != nil {
     return err
@@ -38,7 +38,7 @@ e.Use(authz.Handler())
 
 `Handler` captures the request's `Authorization` header and forwards it verbatim when the principal's policies are fetched, so the IAM API's own tenant scoping applies and the service configures no credentials for this middleware.
 
-With [ds-go-echo-middleware v3](https://github.com/grasp-labs/ds-go-echo-middleware), use `echoiam.ResolvePrincipal` as shown above. It reads the normalized identity from `requestctx.GetPrincipal`, preserves the subject verbatim, and converts the tenant UUID to a string. A missing identity, empty subject, or zero tenant returns `iam.ErrNoPrincipal`. It reads only the normalized principal; legacy claims alone do not satisfy it.
+With [ds-go-echo-middleware v3](https://github.com/grasp-labs/ds-go-echo-middleware), use `principal.ResolvePrincipal` as shown above. It reads the normalized identity from standard `context.Context` through `requestctx.GetPrincipal`, preserves the subject verbatim, and converts the tenant UUID to a string. A missing identity, empty subject, or zero tenant returns `iam.ErrNoPrincipal`. It reads only the normalized principal; legacy claims alone do not satisfy it.
 
 The adapter does not authenticate requests or fetch policies. Order the stack accordingly: request id, authentication, then `authz.Handler()`. Services using another authentication implementation can continue supplying their own `Config.Principal` callback.
 
@@ -133,19 +133,19 @@ checks on proposed write values and service-specific tracing in the service.
 
 ## GORM scopes
 
-`adapter/gormfilter` provides the shared SQL-to-GORM converter. The service owns
+`adapter/gormscope` provides the shared SQL-to-GORM converter. The service owns
 the `sqlfilter.Mapping`, including its resource columns, condition allowlist, and
 publication rules:
 
 ```go
 import (
-    "github.com/grasp-labs/ds-go-iam-middleware/adapter/gormfilter"
+    "github.com/grasp-labs/ds-go-iam-middleware/adapter/gormscope"
     "github.com/grasp-labs/ds-go-iam-middleware/iam"
 )
 
-var listGuard = iam.Guard[gormfilter.Scope]{
+var listGuard = iam.Guard[gormscope.Scope]{
     Action:  "config:listDataset",
-    Convert: gormfilter.Via(datasetMapping),
+    Convert: gormscope.Via(datasetMapping),
 }
 
 scope, err := listGuard.Constrain(ctx)
@@ -163,7 +163,7 @@ For a service that assembles its own predicate, `Bind` applies the completed SQL
 to the supplied query:
 
 ```go
-scope, err := gormfilter.Bind(where, args...)
+scope, err := gormscope.Bind(where, args...)
 ```
 
 Check SQL generation errors before calling `Bind`. SQL must come from trusted

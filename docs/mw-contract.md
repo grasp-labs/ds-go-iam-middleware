@@ -61,7 +61,11 @@ converts the complete constraints into a query scope or other result. The
 converter enforces the allow/deny constraints, including when no allow matches.
 Policy resolution failures skip conversion; converter results pass through unchanged.
 
-**`adapter/gormfilter`** binds a SQL predicate to the supplied GORM query, keeping
+**`adapter/principal`** reads the authenticated identity from standard
+`context.Context` through `requestctx.GetPrincipal` and converts it to
+`iam.Principal` for `Config.Principal`. It does not require an Echo context.
+
+**`adapter/gormscope`** binds a SQL predicate to the supplied GORM query, keeping
 the predicate grouped with other query restrictions. `Via(mapping)` translates
 constraints through `sqlfilter.Where` and delegates to `Bind(sql, args...)`.
 Services retain their mappings and custom predicate preparation. `Scope` is an

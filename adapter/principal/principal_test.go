@@ -1,4 +1,4 @@
-package echoiam_test
+package principal_test
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/grasp-labs/ds-go-echo-middleware/v3/middleware/claims"
 	"github.com/grasp-labs/ds-go-echo-middleware/v3/middleware/requestctx"
-	"github.com/grasp-labs/ds-go-iam-middleware/adapter/echoiam"
+	"github.com/grasp-labs/ds-go-iam-middleware/adapter/principal"
 	"github.com/grasp-labs/ds-go-iam-middleware/iam"
 )
 
@@ -71,7 +71,7 @@ func TestResolvePrincipal(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := echoiam.ResolvePrincipal(test.ctx)
+			got, err := principal.ResolvePrincipal(test.ctx)
 			if got != test.want || !errors.Is(err, test.wantErr) {
 				t.Fatalf("ResolvePrincipal() = (%+v, %v), want (%+v, %v)", got, err, test.want, test.wantErr)
 			}

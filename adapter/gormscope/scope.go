@@ -1,7 +1,7 @@
-// Package gormfilter converts IAM constraints or completed SQL predicates into
+// Package gormscope converts IAM constraints or completed SQL predicates into
 // GORM scopes. Resource mappings and additional query restrictions belong to
 // the service.
-package gormfilter
+package gormscope
 
 import (
 	"errors"
@@ -22,7 +22,7 @@ type Scope = func(*gorm.DB) *gorm.DB
 // predicate is an invalid input, not a permission denial.
 func Bind(where string, args ...any) (Scope, error) {
 	if strings.TrimSpace(where) == "" {
-		return nil, errors.New("gormfilter: empty SQL predicate")
+		return nil, errors.New("gormscope: empty SQL predicate")
 	}
 	if sqlfilter.IsClosed(where) {
 		return nil, iam.ErrAccessDenied

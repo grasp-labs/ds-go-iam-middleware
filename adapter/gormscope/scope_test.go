@@ -1,4 +1,4 @@
-package gormfilter_test
+package gormscope_test
 
 import (
 	"errors"
@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/grasp-labs/ds-go-iam-middleware/adapter/gormfilter"
+	"github.com/grasp-labs/ds-go-iam-middleware/adapter/gormscope"
 	"github.com/grasp-labs/ds-go-iam-middleware/iam"
 	"github.com/grasp-labs/ds-go-policy/adapter/sqlfilter"
 	"github.com/grasp-labs/ds-go-policy/crn"
@@ -43,7 +43,7 @@ func dryRunDB(t *testing.T) *gorm.DB {
 }
 
 func TestBindGroupsWithExistingQueryRestrictions(t *testing.T) {
-	scope, err := gormfilter.Bind("owner_id = ? OR owner_id = ?", "alice", "bob")
+	scope, err := gormscope.Bind("owner_id = ? OR owner_id = ?", "alice", "bob")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestBindGroupsWithExistingQueryRestrictions(t *testing.T) {
 func TestBindPreservesTypedArguments(t *testing.T) {
 	tenant := uuid.MustParse("ba62a53f-afa9-427d-9d91-c7987bc5662e")
 	since := time.Date(2026, time.October, 15, 0, 0, 0, 0, time.UTC)
-	scope, err := gormfilter.Bind(
+	scope, err := gormscope.Bind(
 		"tenant_id = ? AND created_at >= ? AND owner_id IN ? AND archived_at IS NOT DISTINCT FROM ?",
 		tenant, since, []string{"alice' OR true --", "bob"}, nil,
 	)
@@ -99,7 +99,7 @@ func TestBindPreservesTypedArguments(t *testing.T) {
 func TestBindRejectsClosedAndEmptyPredicates(t *testing.T) {
 	for _, where := range []string{"1=0", "", " \n\t"} {
 		t.Run(where, func(t *testing.T) {
-			scope, err := gormfilter.Bind(where)
+			scope, err := gormscope.Bind(where)
 			if scope != nil || err == nil {
 				t.Fatalf("Bind(%q) returned scope or no error", where)
 			}
@@ -145,7 +145,7 @@ func TestVia(t *testing.T) {
 		{"unsupported condition", mapping, unsupported, sqlfilter.ErrUnsupportedCondition},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			scope, err := gormfilter.Via(test.mapping)(test.constraints)
+			scope, err := gormscope.Via(test.mapping)(test.constraints)
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("Via error = %v, want %v", err, test.wantErr)
 			}
