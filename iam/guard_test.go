@@ -201,7 +201,8 @@ func TestGuardConstrainPreservesConverterResultOnError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantErr := errors.New("conversion failed")
+	cause := errors.New("unsupported create constraint")
+	wantErr := errors.Join(ErrPolicyNotEnforceable, cause)
 	guard := Guard[int]{
 		Action: "file:listFiles",
 		Convert: func(engine.Constraints) (int, error) {
@@ -213,7 +214,10 @@ func TestGuardConstrainPreservesConverterResultOnError(t *testing.T) {
 	if got != 42 || !errors.Is(err, wantErr) {
 		t.Fatalf("Constrain = (%d, %v), want (42, %v)", got, err, wantErr)
 	}
-	if errors.Is(err, ErrPolicyResolution) {
-		t.Fatalf("converter error marked as a policy resolution failure: %v", err)
+	if !errors.Is(err, ErrPolicyNotEnforceable) || !errors.Is(err, cause) {
+		t.Fatalf("converter error lost its classification or cause: %v", err)
+	}
+	if errors.Is(err, ErrAccessDenied) || errors.Is(err, ErrPolicyResolution) {
+		t.Fatalf("unenforceable policy marked as access denied or resolution failure: %v", err)
 	}
 }

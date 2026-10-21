@@ -171,6 +171,7 @@ Decisions fail closed; availability degrades before correctness does.
 | Situation | Behavior |
 |---|---|
 | Set resolved, statement denies or nothing matches | `403`, reason logged (`sid` or implicit deny) |
+| Set resolved, a conditional or row-specific deny cannot be evaluated for a create | Service returns `ErrPolicyNotEnforceable`; refusal details stay in logs |
 | Policy source unreachable, cached entry within max-stale | Serve from stale cache; revalidation retries on a short cooldown |
 | Policy source unreachable, no entry or past max-stale | `503` — an outage, not a denial, and callers must be able to tell them apart |
 | Policy set fails to compile | The whole set is refused (`503`) and logged loudly — excluding only the bad document could drop a `deny` and silently widen access. The IAM API's 422 validation makes this a should-never invariant, not a live path |
