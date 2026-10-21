@@ -7,6 +7,10 @@ var (
 	// failures to load or evaluate policies must remain separate errors.
 	ErrAccessDenied = errors.New("iam: access denied")
 
+	// ErrPolicyNotEnforceable means a resolved policy has constraints the service
+	// cannot safely enforce.
+	ErrPolicyNotEnforceable = errors.New("iam: policy cannot be safely enforced")
+
 	// ErrNoPrincipal means the request was never identified. Map it to 401.
 	ErrNoPrincipal = errors.New("iam: no principal in context")
 

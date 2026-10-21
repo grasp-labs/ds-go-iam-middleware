@@ -102,6 +102,7 @@ The buckets matter more than the sentinels. A request that could not be decided 
 | Error | Status | Meaning |
 |---|---|---|
 | `ErrAccessDenied` | 403 | The guard or converter refused access. |
+| `ErrPolicyNotEnforceable` | — | A resolved policy has constraints the service cannot safely enforce. Independent of `ErrAccessDenied`. |
 | `ErrNoPrincipal` | 401 | The request was never identified. |
 | `ErrTokenRejected` | 401 | IAM refused the forwarded token — usually expired since our own auth check. |
 | `ErrNoMiddleware` | 500 | `Decide` ran on a route that skipped `Handler`. A wiring bug. |
@@ -177,6 +178,10 @@ Custom converters and point-check wrappers can use the same `iam.ErrAccessDenied
 for permission denials. Policy-loading failures wrap `ErrPolicyResolution` and
 their original cause. Ordinary `Decide` denials still have `Allowed: false` and
 `Err: nil`.
+
+For a create refused because a conditional or row-specific deny cannot be
+evaluated, return `iam.ErrPolicyNotEnforceable`. Preserve diagnostic causes with
+`errors.Join`.
 
 ## How it works
 
