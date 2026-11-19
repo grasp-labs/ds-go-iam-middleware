@@ -124,7 +124,7 @@ func Decide(ctx context.Context, req Request) Decision {
 
 	set, err := h.load(ctx)
 	if err != nil {
-		h.mw.cfg.Logger.Error("iam: cannot authorize",
+		h.mw.cfg.Logger.ErrorContext(ctx, "iam: cannot authorize",
 			"principal_id", h.principal.ID, "action", req.Action, "error", err)
 		return Decision{Reason: err.Error(), Err: err}
 	}
@@ -143,7 +143,7 @@ func Decide(ctx context.Context, req Request) Decision {
 	// and it must be visible at a production log level. Volume is bounded by
 	// the 403 rate, not the request rate.
 	if !d.Allowed {
-		h.mw.cfg.Logger.Info("iam: denied",
+		h.mw.cfg.Logger.InfoContext(ctx, "iam: denied",
 			"principal_id", h.principal.ID, "action", req.Action, "reason", d.Reason)
 	}
 	return Decision{Allowed: d.Allowed, Reason: d.Reason}
@@ -173,7 +173,7 @@ func Constrain(ctx context.Context, action string, attrs map[string]string) (eng
 
 	set, err := h.load(ctx)
 	if err != nil {
-		h.mw.cfg.Logger.Error("iam: cannot constrain",
+		h.mw.cfg.Logger.ErrorContext(ctx, "iam: cannot constrain",
 			"principal_id", h.principal.ID, "action", action, "error", err)
 		return engine.Constraints{}, err
 	}

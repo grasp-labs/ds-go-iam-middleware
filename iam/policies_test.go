@@ -62,7 +62,9 @@ func TestLoadServesStaleDuringOutage(t *testing.T) {
 	f := &flakyFetcher{raw: fixture(t)}
 	now := time.Now().UTC()
 	m := newStaleTestMiddleware(t, f, &now)
-	ctx := context.Background()
+	logs := newLogContextHandler()
+	m.cfg.Logger = slog.New(logs)
+	ctx := context.WithValue(t.Context(), logContextKey{}, "request-1")
 
 	fresh, err := m.load(ctx, tenantID, "user-1", "Bearer t")
 	if err != nil {
@@ -76,6 +78,7 @@ func TestLoadServesStaleDuringOutage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("within MaxStale, want stale set, got error: %v", err)
 	}
+	logs.requireCorrelated(t, "iam: serving stale policy set")
 	if stale != fresh {
 		t.Error("stale serve rebuilt the compiled set")
 	}
