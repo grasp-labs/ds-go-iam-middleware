@@ -54,13 +54,13 @@ func (m *Middleware) load(ctx context.Context, tenantID, principalID, authorizat
 	prev, cached := m.read(key)
 	now := m.cfg.Now()
 	if cached && now.Sub(prev.FetchedAt) < m.cfg.TTL {
-		return m.compile(prev, principalID)
+		return m.compile(ctx, prev, principalID)
 	}
 
 	// A revalidation failed a moment ago; within the cooldown the entry is
 	// served as it stands rather than paying another fetch round trip.
 	if cached && now.Sub(prev.FetchedAt) < m.cfg.MaxStale && now.Sub(prev.FailedAt) < revalidateCooldown {
-		return m.compile(prev, principalID)
+		return m.compile(ctx, prev, principalID)
 	}
 
 	// Concurrent misses for one principal share a single fetch, made with the
@@ -70,7 +70,7 @@ func (m *Middleware) load(ctx context.Context, tenantID, principalID, authorizat
 		return m.fetch(ctx, key, tenantID, principalID, authorization, prev)
 	})
 	if err == nil {
-		return m.compile(entry.(cacheEntry), principalID)
+		return m.compile(ctx, entry.(cacheEntry), principalID)
 	}
 
 	// An unreachable policy source degrades availability before correctness:
@@ -79,11 +79,11 @@ func (m *Middleware) load(ctx context.Context, tenantID, principalID, authorizat
 	// outages qualify — a 401 or 422 is an answer about this caller and must
 	// surface no matter what is cached.
 	if cached && errors.Is(err, ErrPolicySourceUnavailable) && now.Sub(prev.FetchedAt) < m.cfg.MaxStale {
-		m.cfg.Logger.Warn("iam: serving stale policy set",
+		m.cfg.Logger.WarnContext(ctx, "iam: serving stale policy set",
 			"principal_id", principalID, "age", now.Sub(prev.FetchedAt).String(), "error", err)
 		prev.FailedAt = now
-		m.write(key, prev)
-		return m.compile(prev, principalID)
+		m.write(ctx, key, prev)
+		return m.compile(ctx, prev, principalID)
 	}
 	return nil, err
 }
@@ -99,7 +99,8 @@ func (m *Middleware) Evict(tenantID, principalID string) error {
 
 func (m *Middleware) fetch(ctx context.Context, key, tenantID, principalID, authorization string, prev cacheEntry) (cacheEntry, error) {
 	// Detached from the request: other requests may be waiting on this fetch,
-	// so one client disconnecting must not cancel it.
+	// so one client disconnecting must not cancel it. Keep the initiating
+	// request's context values to correlate fetch logs.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.cfg.Timeout)
 	defer cancel() //nolint:errcheck
 
@@ -114,7 +115,7 @@ func (m *Middleware) fetch(ctx context.Context, key, tenantID, principalID, auth
 	if res.NotModified {
 		entry.Raw, entry.Hash = prev.Raw, prev.Hash
 	}
-	m.write(key, entry)
+	m.write(ctx, key, entry)
 	return entry, nil
 }
 
@@ -127,7 +128,7 @@ func (m *Middleware) fetch(ctx context.Context, key, tenantID, principalID, auth
 // The key is a content hash rather than the ETag because this map is shared by
 // every principal in the process: equal bytes are safe to share, but two
 // principals presenting one ETag would not be.
-func (m *Middleware) compile(e cacheEntry, principalID string) (*engine.Compiled, error) {
+func (m *Middleware) compile(ctx context.Context, e cacheEntry, principalID string) (*engine.Compiled, error) {
 	if set, ok := m.compiled.get(e.Hash); ok {
 		return set, nil
 	}
@@ -140,7 +141,7 @@ func (m *Middleware) compile(e cacheEntry, principalID string) (*engine.Compiled
 	// The response echoes the principal it belongs to. A mismatch means the set
 	// came from somewhere other than the request we made.
 	if policySet.PrincipalID != principalID {
-		m.cfg.Logger.Error("iam: policy set principal mismatch",
+		m.cfg.Logger.ErrorContext(ctx, "iam: policy set principal mismatch",
 			"requested", principalID, "returned", policySet.PrincipalID)
 		return nil, ErrPolicySetMismatch
 	}
@@ -204,14 +205,14 @@ func (m *Middleware) read(key string) (cacheEntry, bool) {
 	return e, true
 }
 
-func (m *Middleware) write(key string, e cacheEntry) {
+func (m *Middleware) write(ctx context.Context, key string, e cacheEntry) {
 	b, err := json.Marshal(e)
 	if err != nil {
-		m.cfg.Logger.Error("iam: encoding cache entry", "error", err)
+		m.cfg.Logger.ErrorContext(ctx, "iam: encoding cache entry", "error", err)
 		return
 	}
 	if err := m.cfg.Cache.Set(key, b); err != nil {
-		m.cfg.Logger.Warn("iam: writing cache entry", "error", err)
+		m.cfg.Logger.WarnContext(ctx, "iam: writing cache entry", "error", err)
 	}
 }
 

@@ -81,7 +81,7 @@ type Config struct {
 	// Timeout bounds one call to the IAM service. Default 3s.
 	Timeout time.Duration
 
-	// Logger defaults to slog.Default().
+	// Logger receives the request context and defaults to slog.Default().
 	Logger *slog.Logger
 
 	// Now is injectable for tests. Defaults to time.Now in UTC; a replacement
